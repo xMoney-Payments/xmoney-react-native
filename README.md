@@ -17,7 +17,7 @@ React Native SDK for [xMoney](https://xmoney.com) checkout. Three surfaces, one 
 
 ## Installation
 
-Latest release: **`0.0.1`**
+Latest release: **`1.0.0`**
 
 ```bash
 npm install @xmoney/react-native
