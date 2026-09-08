@@ -1,4 +1,4 @@
-package com.xmoney.example
+package com.xmoney.reactnative.example
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

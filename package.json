@@ -1,6 +1,6 @@
 {
   "name": "@xmoney/react-native",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "xMoney React Native SDK: thin wrapper over xmoney-ios and xmoney-android PaymentSheet, Payment Element, and wallet buttons.",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -43,14 +43,16 @@
     "!**/.*"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": false
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
     "test": "jest",
     "clean": "del-cli lib",
-    "prepare": "bob build"
+    "prepare": "bob build",
+    "prepublishOnly": "npm run typecheck && npm test"
   },
   "expo": {
     "plugin": "./app.plugin.js"
@@ -107,9 +109,25 @@
     "source": "src",
     "output": "lib",
     "targets": [
-      ["commonjs", { "esm": true }],
-      ["module", { "esm": true }],
-      ["typescript", { "esm": true, "project": "tsconfig.build.json" }]
+      [
+        "commonjs",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "esm": true,
+          "project": "tsconfig.build.json"
+        }
+      ]
     ]
   }
 }

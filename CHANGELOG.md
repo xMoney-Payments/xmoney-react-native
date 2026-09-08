@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-08
+
+First stable release (`@xmoney/react-native` on npm).
+
+Pins native SDKs to CocoaPods `XMoneyPaymentSheet` **1.0.0** and Maven `com.xmoney:*` **1.0.0**.
+
+### Changed
+
+- Example app Android/iOS bundle IDs use `com.xmoney.reactnative.example` so it can install alongside native SDK demos.
+
 ## [0.0.1] - 2026-09-02
 
 First public release (`@xmoney/react-native` on npm).

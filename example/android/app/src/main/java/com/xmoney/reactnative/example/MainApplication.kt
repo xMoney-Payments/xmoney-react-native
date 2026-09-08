@@ -1,4 +1,4 @@
-package com.xmoney.example
+package com.xmoney.reactnative.example
 
 import android.app.Application
 import com.facebook.react.PackageList
