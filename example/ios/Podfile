@@ -1,0 +1,57 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'XMoneyExample' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+    # fmt 11.0.2 (RN 0.78) always #define FMT_USE_CONSTEVAL 1, so a -D flag is
+    # overwritten. Force it off after detection — Xcode 26 Clang rejects that
+    # consteval (https://github.com/fmtlib/fmt/issues/4181).
+    fmt_base = File.join(installer.sandbox.root, 'fmt/include/fmt/base.h')
+    if File.exist?(fmt_base)
+      contents = File.read(fmt_base)
+      unless contents.include?('xmoney-example: disable fmt consteval')
+        contents.sub!(
+          "#if FMT_USE_CONSTEVAL\n#  define FMT_CONSTEVAL consteval",
+          "#undef FMT_USE_CONSTEVAL\n#define FMT_USE_CONSTEVAL 0 // xmoney-example: disable fmt consteval\n#if FMT_USE_CONSTEVAL\n#  define FMT_CONSTEVAL consteval"
+        )
+        File.chmod(0644, fmt_base)
+        File.write(fmt_base, contents)
+      end
+    end
+    # Xcode 16+/26 Swift explicit modules fail to import C++ RN headers
+    # (`memory` / `cassert` not found) when compiling this wrapper.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |bc|
+        bc.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      end
+    end
+  end
+end

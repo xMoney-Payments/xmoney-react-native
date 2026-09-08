@@ -1,0 +1,17 @@
+{
+  "publicKey": "pk_test_abc",
+  "card": {
+    "savedCards": { "enabled": true, "optInVisible": false },
+    "inputs": { "grouping": "spaced" },
+    "validationMode": "onBlur",
+    "submitButton": { "visible": true, "type": "pay" }
+  },
+  "paymentMethods": {
+    "applePay": { "enabled": true },
+    "googlePay": { "enabled": true }
+  },
+  "options": {
+    "locale": "en-US",
+    "style": "alwaysLight"
+  }
+}

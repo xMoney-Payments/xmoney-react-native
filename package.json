@@ -1,0 +1,115 @@
+{
+  "name": "@xmoney/react-native",
+  "version": "0.0.1",
+  "description": "xMoney React Native SDK: thin wrapper over xmoney-ios and xmoney-android PaymentSheet, Payment Element, and wallet buttons.",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/module/src/index.d.ts",
+  "react-native": "src/index.tsx",
+  "source": "src/index.tsx",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./lib/typescript/module/src/index.d.ts",
+        "default": "./lib/module/index.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/src/index.d.ts",
+        "default": "./lib/commonjs/index.js"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "app.plugin.js",
+    "xmoney-react-native.podspec",
+    "react-native.config.js",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!android/src/test",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "test": "jest",
+    "clean": "del-cli lib",
+    "prepare": "bob build"
+  },
+  "expo": {
+    "plugin": "./app.plugin.js"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "payments",
+    "xmoney",
+    "checkout",
+    "apple-pay",
+    "google-pay",
+    "3ds"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xMoney-Payments/xmoney-react-native.git"
+  },
+  "author": "xMoney",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.2.0",
+    "react-native": ">=0.76.0"
+  },
+  "devDependencies": {
+    "@expo/config-plugins": "^9.0.0",
+    "@react-native/babel-preset": "^0.78.0",
+    "@react-native/eslint-config": "^0.78.0",
+    "@types/jest": "^29.5.14",
+    "@types/react": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "del-cli": "^5.1.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.3",
+    "react": "19.0.0",
+    "react-native": "0.78.0",
+    "react-native-builder-bob": "^0.35.0",
+    "react-test-renderer": "19.0.0",
+    "typescript": "^5.5.4"
+  },
+  "codegenConfig": {
+    "name": "XMoneyPaymentSheetSpec",
+    "type": "all",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.xmoney.reactnative"
+    }
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      ["commonjs", { "esm": true }],
+      ["module", { "esm": true }],
+      ["typescript", { "esm": true, "project": "tsconfig.build.json" }]
+    ]
+  }
+}

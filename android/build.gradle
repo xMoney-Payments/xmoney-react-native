@@ -1,0 +1,111 @@
+buildscript {
+  ext.getExtOrDefault = {name ->
+    return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties["XMoneyReactNative_" + name]
+  }
+
+  def kotlin_version = getExtOrDefault("kotlinVersion")
+
+  repositories {
+    google()
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath "com.android.tools.build:gradle:8.1.1"
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    if (kotlin_version.toString().tokenize('.')[0].toInteger() >= 2) {
+      classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:$kotlin_version"
+    }
+  }
+}
+
+def getExtOrDefault(name) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties["XMoneyReactNative_" + name]
+}
+
+def isNewArchitectureEnabled() {
+  return true
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+apply plugin: "com.facebook.react"
+if (getExtOrDefault("kotlinVersion").toString().tokenize('.')[0].toInteger() >= 2) {
+  apply plugin: "org.jetbrains.kotlin.plugin.compose"
+}
+
+def getExtOrIntegerDefault(name) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties["XMoneyReactNative_" + name]).toInteger()
+}
+
+android {
+  namespace "com.xmoney.reactnative"
+
+  compileSdkVersion getExtOrIntegerDefault("compileSdkVersion")
+
+  defaultConfig {
+    minSdkVersion getExtOrIntegerDefault("minSdkVersion")
+    targetSdkVersion getExtOrIntegerDefault("targetSdkVersion")
+    buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+  }
+
+  buildFeatures {
+    buildConfig true
+    compose true
+  }
+
+  if (getExtOrDefault("kotlinVersion").toString().tokenize('.')[0].toInteger() < 2) {
+    composeOptions {
+      kotlinCompilerExtensionVersion = "1.5.14"
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  sourceSets {
+    main {
+      java.srcDirs("src/main/java")
+      java.srcDir("generated/java")
+      java.srcDir("generated/jni")
+    }
+    test {
+      resources.srcDir("../src/__fixtures__")
+    }
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+}
+
+def kotlin_version = getExtOrDefault("kotlinVersion")
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+
+  implementation "com.xmoney:paymentsheet:0.0.3"
+  implementation "com.xmoney:paymentelement:0.0.3"
+  implementation "com.xmoney:googlepay:0.0.3"
+
+  implementation platform("androidx.compose:compose-bom:2024.09.03")
+  implementation "androidx.compose.ui:ui"
+  implementation "androidx.compose.foundation:foundation"
+  implementation "androidx.activity:activity-compose:1.9.3"
+  implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.6"
+  implementation "androidx.lifecycle:lifecycle-runtime-compose:2.8.6"
+  implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.6"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+  implementation "androidx.savedstate:savedstate-ktx:1.2.1"
+
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.json:json:20240303"
+}

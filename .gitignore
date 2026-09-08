@@ -1,0 +1,27 @@
+# OSX
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build output
+lib/
+
+# Xcode / CocoaPods
+ios/build/
+ios/Pods/
+ios/*.xcworkspace
+*.xcuserstate
+
+# Android / Gradle
+android/build/
+android/.gradle/
+android/.idea/
+android/local.properties
+.cxx/
+
+# Env
+.env
+example/secrets.json
