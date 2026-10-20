@@ -12,13 +12,25 @@ public final class XMoneyPaymentElementView: UIView {
     @objc public var onHeightChange: (([AnyHashable: Any]) -> Void)?
     @objc public var onAvailability: (([AnyHashable: Any]) -> Void)?
     @objc public var onOrderUpdated: (([AnyHashable: Any]) -> Void)?
+    @objc public var onUpdateFailed: (([AnyHashable: Any]) -> Void)?
 
     private var element: PaymentElement?
     private var payment: EmbeddedPayment?
     private var orderPayload = ""
     private var orderChecksum = ""
+    private var boundPayload = ""
+    private var boundChecksum = ""
+    private var boundConfig: [String: Any] = [:]
+    private var hasPrepared = false
     private var prepareTask: Task<Void, Never>?
+    private var pendingIntent: PaymentIntent?
+    /// True while `updateOrder(createOrder)` holds the native lock.
+    private var creatingOrder = false
+    private var createToken = 0
     private var lastReportedHeight: CGFloat = -1
+    /// `onReady` is sent once per mount. A failed first load is `onResult`.
+    private var didSendReady = false
+    private let orders = PendingOrders()
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -32,13 +44,28 @@ public final class XMoneyPaymentElementView: UIView {
     }
 
     deinit {
+        orders.cancelAll()
         prepareTask?.cancel()
     }
 
     @objc(prepareWithOrderPayload:orderChecksum:)
     public func prepare(orderPayload: NSString, orderChecksum: NSString) {
-        self.orderPayload = orderPayload as String
-        self.orderChecksum = orderChecksum as String
+        let nextPayload = orderPayload as String
+        let nextChecksum = orderChecksum as String
+        let nextConfig = BridgeMaps.stringMap(configuration) ?? [:]
+        let sameOrder = hasPrepared
+            && nextPayload == boundPayload
+            && nextChecksum == boundChecksum
+            && NSDictionary(dictionary: nextConfig).isEqual(NSDictionary(dictionary: boundConfig))
+        if sameOrder && (element != nil || prepareTask != nil) {
+            return
+        }
+        self.orderPayload = nextPayload
+        self.orderChecksum = nextChecksum
+        self.boundPayload = nextPayload
+        self.boundChecksum = nextChecksum
+        self.boundConfig = nextConfig
+        self.hasPrepared = true
         bind(requestId: "")
     }
 
@@ -51,6 +78,29 @@ public final class XMoneyPaymentElementView: UIView {
         self.orderPayload = orderPayload as String
         self.orderChecksum = orderChecksum as String
         runUpdateOrder(requestId: requestId as String)
+    }
+
+    @objc(beginUpdateOrderWithRequestId:)
+    public func beginUpdateOrder(requestId: NSString) {
+        beginUpdateOrder(requestId: requestId as String)
+    }
+
+    @objc(resolveOrderWithOrderPayload:orderChecksum:requestId:)
+    public func resolveOrder(
+        orderPayload: NSString,
+        orderChecksum: NSString,
+        requestId: NSString
+    ) {
+        let intent = BridgeConfigParser.parseIntent(
+            orderPayload: orderPayload as String,
+            orderChecksum: orderChecksum as String
+        )
+        orders.settle(requestId: requestId as String, result: .success(intent))
+    }
+
+    @objc(rejectOrderWithRequestId:)
+    public func rejectOrder(requestId: NSString) {
+        orders.settle(requestId: requestId as String, result: .failure(OrderCreationRejected()))
     }
 
     @objc(updateAppearanceWithAppearanceJson:)
@@ -127,11 +177,16 @@ public final class XMoneyPaymentElementView: UIView {
             orderPayload: orderPayload,
             orderChecksum: orderChecksum
         )
+        if requestId.isEmpty, creatingOrder {
+            pendingIntent = intent
+            return
+        }
         prepareTask?.cancel()
         prepareTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
             do {
                 try await element.updateOrder(intent: intent)
+                self.pendingIntent = nil
                 self.reportHeight()
                 self.emitAvailability()
                 self.emitOrderUpdated(requestId: requestId, success: true, error: nil)
@@ -142,8 +197,128 @@ public final class XMoneyPaymentElementView: UIView {
                     error: "SUPERSEDED_UPDATE_ORDER"
                 )
             } catch {
+                if requestId.isEmpty,
+                   let payment = error as? PaymentError,
+                   payment == .paymentInProgress {
+                    self.pendingIntent = intent
+                    return
+                }
                 let mapped = BridgeCatch.codeMessage(error)
+                self.reportLoadFailureIfNeeded(code: mapped.code, message: mapped.message)
                 self.emitOrderUpdated(requestId: requestId, success: false, error: mapped.code)
+            }
+        }
+    }
+
+    private func beginUpdateOrder(requestId: String) {
+        if orders.isFinished(requestId) {
+            emitOrderUpdated(
+                requestId: requestId,
+                success: false,
+                error: "SUPERSEDED_UPDATE_ORDER"
+            )
+            return
+        }
+        let gate = orders.begin(requestId)
+        guard let element else {
+            orders.close(requestId)
+            emitOrderUpdated(requestId: requestId, success: false, error: "NOT_INITIALIZED")
+            return
+        }
+        createToken += 1
+        let token = createToken
+        creatingOrder = true
+        prepareTask?.cancel()
+        prepareTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.orders.close(requestId)
+                if self.createToken == token {
+                    self.creatingOrder = false
+                }
+            }
+            guard !Task.isCancelled else {
+                self.emitOrderUpdated(
+                    requestId: requestId,
+                    success: false,
+                    error: "SUPERSEDED_UPDATE_ORDER"
+                )
+                return
+            }
+            do {
+                let bound = try await element.updateOrder { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    self.emitAvailability()
+                    return try await gate.awaitIntent()
+                }
+                guard !Task.isCancelled else {
+                    self.emitOrderUpdated(
+                        requestId: requestId,
+                        success: false,
+                        error: "SUPERSEDED_UPDATE_ORDER"
+                    )
+                    return
+                }
+                self.orderPayload = bound.orderPayload
+                self.orderChecksum = bound.orderChecksum
+                self.boundPayload = bound.orderPayload
+                self.boundChecksum = bound.orderChecksum
+                self.reportHeight()
+                self.emitAvailability()
+                self.emitOrderUpdated(requestId: requestId, success: true, error: nil)
+                self.creatingOrder = false
+                self.retryPendingIntent()
+            } catch is CancellationError {
+                self.emitOrderUpdated(
+                    requestId: requestId,
+                    success: false,
+                    error: "SUPERSEDED_UPDATE_ORDER"
+                )
+            } catch is OrderCreationRejected {
+                self.emitAvailability()
+                self.emitOrderUpdated(
+                    requestId: requestId,
+                    success: false,
+                    error: "ORDER_CREATION_FAILED"
+                )
+                self.creatingOrder = false
+                self.retryPendingIntent()
+            } catch {
+                let mapped = BridgeCatch.codeMessage(error)
+                self.reportLoadFailureIfNeeded(code: mapped.code, message: mapped.message)
+                self.emitOrderUpdated(requestId: requestId, success: false, error: mapped.code)
+                self.creatingOrder = false
+                self.retryPendingIntent()
+            }
+        }
+    }
+
+    /// A failed update that cancelled the first load would otherwise leave the
+    /// merchant spinner up: Ready is not sent, and a first-bind failure is not
+    /// `onUpdateFailed`.
+    private func reportLoadFailureIfNeeded(code: String, message: String) {
+        guard !didSendReady else { return }
+        emitFailed(code: code, message: message)
+    }
+
+    /// A prop-driven update that arrived during a charge is retried once Pay unlocks.
+    private func retryPendingIntent() {
+        guard let pendingIntent, let element else { return }
+        self.pendingIntent = nil
+        prepareTask?.cancel()
+        prepareTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            do {
+                try await element.updateOrder(intent: pendingIntent)
+                self.reportHeight()
+                self.emitAvailability()
+            } catch is CancellationError {
+                return
+            } catch {
+                if let payment = error as? PaymentError, payment == .paymentInProgress {
+                    self.pendingIntent = pendingIntent
+                    return
+                }
             }
         }
     }
@@ -167,6 +342,7 @@ public final class XMoneyPaymentElementView: UIView {
         requestId: String
     ) {
         prepareTask?.cancel()
+        didSendReady = false
         element?.removeFromSuperview()
         element = nil
         payment = nil
@@ -179,11 +355,22 @@ public final class XMoneyPaymentElementView: UIView {
         let view = PaymentElement(payment: payment) { [weak self] event in
             switch event {
             case .ready:
+                self?.didSendReady = true
                 self?.onReady?([:])
                 self?.reportHeight()
                 self?.emitAvailability()
             case let .processing(isProcessing):
                 self?.onProcessing?(["isProcessing": isProcessing])
+                self?.emitAvailability()
+                if !isProcessing {
+                    self?.retryPendingIntent()
+                }
+            case let .updateFailed(error):
+                let mapped = BridgeCatch.codeMessage(error)
+                self?.onUpdateFailed?([
+                    "code": mapped.code,
+                    "message": mapped.message,
+                ])
                 self?.emitAvailability()
             }
         }
@@ -200,7 +387,6 @@ public final class XMoneyPaymentElementView: UIView {
         ])
         element = view
         reportHeight()
-        emitAvailability()
 
         prepareTask = Task { @MainActor [weak self] in
             guard !Task.isCancelled else { return }
@@ -209,23 +395,24 @@ public final class XMoneyPaymentElementView: UIView {
                 self?.reportHeight()
                 self?.emitAvailability()
                 self?.emitOrderUpdated(requestId: requestId, success: true, error: nil)
+            } catch is CancellationError {
+                return
             } catch {
-                self?.onResult?([
-                    "resultJson": BridgeResults.failedJSON(
-                        code: BridgeCatch.codeMessage(error).code,
-                        message: BridgeCatch.codeMessage(error).message
-                    ),
-                ])
+                let mapped = BridgeCatch.codeMessage(error)
+                self?.emitFailed(code: mapped.code, message: mapped.message)
                 self?.emitOrderUpdated(
                     requestId: requestId,
                     success: false,
-                    error: BridgeCatch.codeMessage(error).code
+                    error: mapped.code
                 )
             }
         }
     }
 
     private func emitAvailability() {
+        // The form is still showing its loader until ready. Later calls report
+        // the pay lock and whether the order was consumed.
+        guard didSendReady else { return }
         onAvailability?([
             "isOrderConsumed": payment?.isOrderConsumed ?? element?.isOrderConsumed ?? false,
             "isInteractionEnabled": payment?.isInteractionEnabled ?? true,

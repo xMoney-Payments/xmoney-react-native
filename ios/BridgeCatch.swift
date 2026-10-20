@@ -13,6 +13,9 @@ enum BridgeCatch {
 
     static func codeMessage(_ error: Error) -> (code: String, message: String) {
         if let payment = error as? PaymentError {
+            if payment == .paymentInProgress {
+                return ("PAYMENT_IN_PROGRESS", "Payment in progress")
+            }
             let facing = payment.merchantFacing()
             return (facing.code, facing.message)
         }

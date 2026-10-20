@@ -20,6 +20,7 @@ import {
   defaultPaymentConfig,
   formatMoney,
   isNativeBoundEvent,
+  isSupersededUpdate,
   orderConsumed,
 } from '../SampleHelpers';
 import {ExampleRadii} from '../theme/ExampleColors';
@@ -525,6 +526,9 @@ function EmbeddedCheckout({
   const total = subtotalMinor(lines);
   const count = itemCount(lines);
   const description = `${brand.name} · ${count} ${count === 1 ? 'item' : 'items'}`;
+  const requestRef = useRef(0);
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
   const configuration = useMemo(
     () => defaultPaymentConfig({dark, appearance: brand.appearance}),
     [brand.appearance, dark]
@@ -534,32 +538,49 @@ function EmbeddedCheckout({
     if (lines.length === 0) {
       return;
     }
+    const request = ++requestRef.current;
+    const amount = total;
+    const orderDescription = description;
     let cancelled = false;
-    const handle = setTimeout(() => {
-      void (async () => {
-        setError(null);
-        try {
-          const next = await DemoCheckoutBackend.createPaymentIntent({
-            amountMinor: total,
-            description,
+    setError(null);
+    void (async () => {
+      try {
+        const element = elementRef.current;
+        if (intentRef.current && element) {
+          const next = await element.updateOrder(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            if (!element.isUpdateCurrent()) {
+              throw new Error('superseded');
+            }
+            return DemoCheckoutBackend.createPaymentIntent({
+              amountMinor: amount,
+              description: orderDescription,
+            });
           });
-          if (cancelled) {
+          if (cancelled || request !== requestRef.current) {
             return;
           }
-          if (elementRef.current && intent) {
-            await elementRef.current.updateOrder(next);
-          }
           setIntent(next);
-        } catch (e) {
-          if (!cancelled) {
-            setError(e instanceof Error ? e.message : 'Could not create order');
-          }
+          return;
         }
-      })();
-    }, intent ? 300 : 0);
+        const next = await DemoCheckoutBackend.createPaymentIntent({
+          amountMinor: amount,
+          description: orderDescription,
+        });
+        if (cancelled || request !== requestRef.current) {
+          return;
+        }
+        setIntent(next);
+      } catch (e) {
+        if (cancelled || request !== requestRef.current || isSupersededUpdate(e)) {
+          return;
+        }
+        setError(e instanceof Error ? e.message : 'Could not create order');
+      }
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(handle);
+      requestRef.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [total, description]);

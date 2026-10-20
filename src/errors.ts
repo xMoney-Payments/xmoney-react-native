@@ -8,6 +8,8 @@ export const STABLE_MESSAGES: Readonly<Record<string, string>> = {
   PRESENT_ERROR: 'Failed to present',
   LOAD_ERROR: 'Failed to load',
   SUPERSEDED_UPDATE_ORDER: 'Superseded by a newer updateOrder call',
+  ORDER_CREATION_FAILED: 'Order creation failed',
+  PAYMENT_IN_PROGRESS: 'Payment in progress',
   APPLE_PAY: 'Apple Pay is only available on iOS.',
   GOOGLE_PAY: 'Google Pay is only available on Android.',
 };

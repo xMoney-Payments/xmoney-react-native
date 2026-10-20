@@ -36,7 +36,10 @@ export type NativePrepareOptions = {
   localeIsStructural?: boolean;
   ignoreMethodAppearance?: boolean;
   liveKeys?: RefObject<NativePrepareLiveKeys>;
-  /** True after the host reports a non-zero width. Retries prepare until acked. */
+  /**
+   * True after the host reports a non-zero width. The first prepare waits for
+   * this so a later layout pass does not bind the native view twice.
+   */
   layoutReady?: boolean;
 };
 
@@ -178,15 +181,13 @@ export function useNativePrepare<T>(
 
   useLayoutEffect(() => {
     const node = viewRef.current;
-    if (!node) {
+    if (!node || !layoutReady) {
       return;
     }
 
     const applied = live.current;
     const needsPrepare =
-      !applied.prepared ||
-      applied.structural !== structural ||
-      (layoutReady && !applied.acked);
+      !applied.prepared || applied.structural !== structural;
     if (needsPrepare) {
       commands.prepare(node, intent.orderPayload, intent.orderChecksum);
       live.current = appliedLiveKeys(

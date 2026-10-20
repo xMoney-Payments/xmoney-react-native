@@ -9,6 +9,10 @@ import {
   sanitizePaymentError,
   XMoneyPaymentError,
 } from './errors';
+import {
+  createImperativeOrderUpdater,
+  type OrderUpdater,
+} from './components/orderUpdater';
 import { getModule, nextRequestId, subscribeNativeEvents } from './nativeModule';
 import { parsePaymentResult } from './parseResult';
 import { PresentSession } from './presentSession';
@@ -21,6 +25,27 @@ import type {
 } from './types';
 
 const session = new PresentSession();
+let orders: OrderUpdater | null = null;
+
+function orderUpdater(): OrderUpdater {
+  if (!orders) {
+    orders = createImperativeOrderUpdater({
+      updateIntent: (intent) => getModule().updateGooglePayOrder(intent),
+      begin: (requestId) => getModule().beginGooglePayUpdateOrder(requestId),
+      resolve: (orderPayload, orderChecksum, requestId) => {
+        getModule().resolveGooglePayOrder(
+          requestId,
+          orderPayload,
+          orderChecksum
+        );
+      },
+      reject: (requestId) => {
+        getModule().rejectGooglePayOrder(requestId);
+      },
+    });
+  }
+  return orders;
+}
 
 function unsupported(): PaymentResult {
   return {
@@ -39,8 +64,9 @@ function unsupported(): PaymentResult {
  * Pre-auth wallet dismiss resolves `{ status: 'canceled' }` and does not consume;
  * present the same intent again.
  *
- * `updateOrder` rebinds the open host — call after `present`, while the overlay
- * is still open.
+ * `updateOrder(intent)` rebinds the open host. `updateOrder(createOrder)` locks
+ * the wallet before the callback returns. Call after `present`, while the
+ * overlay is still open. `isUpdateCurrent()` is false inside a superseded callback.
  *
  * `getState(intent?)` probes native availability. Pass `intent` or call after
  * `present`. After `init` only, flags stay `false`. `isAvailable` is site/config;
@@ -84,9 +110,10 @@ export const GooglePay = {
   },
 
   /**
-   * Rebind a new signed order on the open Google Pay host. Call after `present`.
+   * `updateOrder(intent)` rebinds a signed order. `updateOrder(createOrder)`
+   * locks the wallet first and returns the bound intent. Call after `present`.
    */
-  async updateOrder(intent: PaymentIntent): Promise<void> {
+  updateOrder: (async (intentOrCreate) => {
     getModule();
     if (Platform.OS !== 'android') {
       throw new XMoneyPaymentError(
@@ -94,7 +121,15 @@ export const GooglePay = {
         'Google Pay is only available on Android.'
       );
     }
-    await getModule().updateGooglePayOrder(intent);
+    return orderUpdater().updateOrder(intentOrCreate);
+  }) as {
+    (intent: PaymentIntent): Promise<void>;
+    (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
+  },
+
+  /** False once a newer `updateOrder` has replaced the callback that is running. */
+  isUpdateCurrent(): boolean {
+    return orderUpdater().isUpdateCurrent();
   },
 
   dismiss(): void {
@@ -113,4 +148,6 @@ export const GooglePay = {
 /** Clears in-flight present state. Used by unit tests. */
 export function resetGooglePayState(): void {
   session.reset();
+  orders?.detach();
+  orders = null;
 }

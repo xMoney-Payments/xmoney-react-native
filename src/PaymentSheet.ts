@@ -47,7 +47,11 @@ export const PaymentSheet = {
     const requestId = nextRequestId();
     const subscription = subscribeNativeEvents(
       requestId,
-      session.track(generation, onEvent)
+      session.track(generation, (event) => {
+        if (event.type !== 'updateFailed') {
+          onEvent?.(event);
+        }
+      })
     );
 
     try {

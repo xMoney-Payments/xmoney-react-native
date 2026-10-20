@@ -23,7 +23,7 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++20"
   }
 
-  s.dependency "XMoneyPaymentSheet", "1.0.0"
+  s.dependency "XMoneyPaymentSheet", "1.1.0"
 
   install_modules_dependencies(s)
 end

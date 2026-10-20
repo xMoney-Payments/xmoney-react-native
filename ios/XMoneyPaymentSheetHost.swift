@@ -15,6 +15,8 @@ public final class XMoneyPaymentSheetHost: NSObject {
     private var applePayConfig: PaymentConfig?
     private var applePay: ApplePay?
     private var applePayResolve: ((NSDictionary) -> Void)?
+    private var applePayUpdateTask: Task<Void, Never>?
+    private let applePayOrders = PendingOrders()
     private var googlePayConfig: PaymentConfig?
     private var presentGeneration = 0
 
@@ -168,7 +170,8 @@ public final class XMoneyPaymentSheetHost: NSObject {
         let dict = BridgeMaps.stringMap(intentMap) ?? [:]
         let payload = dict["orderPayload"] as? String ?? ""
         let checksum = dict["orderChecksum"] as? String ?? ""
-        Task { @MainActor [weak self] in
+        applePayUpdateTask?.cancel()
+        applePayUpdateTask = Task { @MainActor [weak self] in
             guard let self else { return }
             guard let applePay = self.applePay else {
                 onReject("NOT_INITIALIZED", "Call init before present.")
@@ -181,10 +184,103 @@ public final class XMoneyPaymentSheetHost: NSObject {
             do {
                 try await applePay.updateOrder(intent: intent)
                 onResolve([:] as NSDictionary)
+            } catch is CancellationError {
+                onReject(
+                    "SUPERSEDED_UPDATE_ORDER",
+                    "Superseded by a newer updateOrder call"
+                )
             } catch {
                 let mapped = BridgeCatch.codeMessage(error)
                 onReject(mapped.code as NSString, mapped.message as NSString)
             }
+        }
+    }
+
+    @objc(beginApplePayUpdateOrder:onResolve:onReject:)
+    public func beginApplePayUpdateOrder(
+        _ requestId: NSString,
+        onResolve: @escaping (NSDictionary) -> Void,
+        onReject: @escaping (NSString, NSString) -> Void
+    ) {
+        let id = requestId as String
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if self.applePayOrders.isFinished(id) {
+                onReject(
+                    "SUPERSEDED_UPDATE_ORDER",
+                    "Superseded by a newer updateOrder call"
+                )
+                return
+            }
+            guard let applePay = self.applePay else {
+                self.applePayOrders.close(id)
+                onReject("NOT_INITIALIZED", "Call init before present.")
+                return
+            }
+            let gate = self.applePayOrders.begin(id)
+            self.applePayUpdateTask?.cancel()
+            self.applePayUpdateTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.applePayOrders.close(id) }
+                guard !Task.isCancelled else {
+                    onReject(
+                        "SUPERSEDED_UPDATE_ORDER",
+                        "Superseded by a newer updateOrder call"
+                    )
+                    return
+                }
+                do {
+                    _ = try await applePay.updateOrder {
+                        try await gate.awaitIntent()
+                    }
+                    guard !Task.isCancelled else {
+                        onReject(
+                            "SUPERSEDED_UPDATE_ORDER",
+                            "Superseded by a newer updateOrder call"
+                        )
+                        return
+                    }
+                    onResolve([:] as NSDictionary)
+                } catch is CancellationError {
+                    onReject(
+                        "SUPERSEDED_UPDATE_ORDER",
+                        "Superseded by a newer updateOrder call"
+                    )
+                } catch is OrderCreationRejected {
+                    onReject("ORDER_CREATION_FAILED", "Order creation failed")
+                } catch {
+                    let mapped = BridgeCatch.codeMessage(error)
+                    onReject(mapped.code as NSString, mapped.message as NSString)
+                }
+            }
+        }
+    }
+
+    @objc(resolveApplePayOrder:orderPayload:orderChecksum:)
+    public func resolveApplePayOrder(
+        _ requestId: NSString,
+        orderPayload: NSString,
+        orderChecksum: NSString
+    ) {
+        let intent = BridgeConfigParser.parseIntent(
+            orderPayload: orderPayload as String,
+            orderChecksum: orderChecksum as String
+        )
+        Task { @MainActor [weak self] in
+            self?.applePayOrders.settle(
+                requestId: requestId as String,
+                result: .success(intent)
+            )
+        }
+    }
+
+    @objc(rejectApplePayOrder:)
+    public func rejectApplePayOrder(_ requestId: NSString) {
+        Task { @MainActor [weak self] in
+            self?.applePayOrders.settle(
+                requestId: requestId as String,
+                result: .failure(OrderCreationRejected())
+            )
         }
     }
 
@@ -253,6 +349,33 @@ public final class XMoneyPaymentSheetHost: NSObject {
         _ = intentMap
         _ = onResolve
         onReject("GOOGLE_PAY", "Google Pay is only available on Android.")
+    }
+
+    @objc(beginGooglePayUpdateOrder:onResolve:onReject:)
+    public func beginGooglePayUpdateOrder(
+        _ requestId: NSString,
+        onResolve: @escaping (NSDictionary) -> Void,
+        onReject: @escaping (NSString, NSString) -> Void
+    ) {
+        _ = requestId
+        _ = onResolve
+        onReject("GOOGLE_PAY", "Google Pay is only available on Android.")
+    }
+
+    @objc(resolveGooglePayOrder:orderPayload:orderChecksum:)
+    public func resolveGooglePayOrder(
+        _ requestId: NSString,
+        orderPayload: NSString,
+        orderChecksum: NSString
+    ) {
+        _ = requestId
+        _ = orderPayload
+        _ = orderChecksum
+    }
+
+    @objc(rejectGooglePayOrder:)
+    public func rejectGooglePayOrder(_ requestId: NSString) {
+        _ = requestId
     }
 
     @objc(answerCardHolderVerification:accepted:)

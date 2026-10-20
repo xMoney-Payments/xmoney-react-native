@@ -29,6 +29,23 @@ describe('PresentSession', () => {
     expect(session.inFlight).toBe(false);
   });
 
+  it('forwards updateFailed without changing processing', () => {
+    const session = new PresentSession();
+    session.begin({ assumeProcessing: true });
+    const events: Array<{ type: string }> = [];
+    session.track(session.generation, (event) => events.push(event))({
+      type: 'updateFailed',
+      error: { code: 'LOAD_ERROR', message: 'Failed to load' },
+    });
+    expect(session.isProcessing).toBe(true);
+    expect(events).toEqual([
+      {
+        type: 'updateFailed',
+        error: { code: 'LOAD_ERROR', message: 'Failed to load' },
+      },
+    ]);
+  });
+
   it('tracks processing only for the current generation', () => {
     const session = new PresentSession();
     session.begin();

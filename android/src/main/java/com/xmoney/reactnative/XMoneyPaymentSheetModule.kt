@@ -83,6 +83,22 @@ class XMoneyPaymentSheetModule(reactContext: ReactApplicationContext) :
         XMoneyPaymentSheetBridge.updateApplePayOrder(promise)
     }
 
+    override fun beginApplePayUpdateOrder(requestId: String, promise: Promise) {
+        XMoneyPaymentSheetBridge.beginApplePayUpdateOrder(requestId, promise)
+    }
+
+    override fun resolveApplePayOrder(
+        requestId: String,
+        orderPayload: String,
+        orderChecksum: String,
+    ) {
+        XMoneyPaymentSheetBridge.resolveApplePayOrder(requestId, orderPayload, orderChecksum)
+    }
+
+    override fun rejectApplePayOrder(requestId: String) {
+        XMoneyPaymentSheetBridge.rejectApplePayOrder(requestId)
+    }
+
     override fun updateGooglePayOrder(intent: ReadableMap, promise: Promise) {
         XMoneyPaymentSheetBridge.updateGooglePayOrder(
             reactApplicationContext,
@@ -90,6 +106,32 @@ class XMoneyPaymentSheetModule(reactContext: ReactApplicationContext) :
             promise,
             googlePayHolder,
         )
+    }
+
+    override fun beginGooglePayUpdateOrder(requestId: String, promise: Promise) {
+        XMoneyPaymentSheetBridge.beginGooglePayUpdateOrder(
+            reactApplicationContext,
+            requestId,
+            promise,
+            googlePayHolder,
+        )
+    }
+
+    override fun resolveGooglePayOrder(
+        requestId: String,
+        orderPayload: String,
+        orderChecksum: String,
+    ) {
+        XMoneyPaymentSheetBridge.resolveGooglePayOrder(
+            requestId,
+            orderPayload,
+            orderChecksum,
+            googlePayHolder,
+        )
+    }
+
+    override fun rejectGooglePayOrder(requestId: String) {
+        XMoneyPaymentSheetBridge.rejectGooglePayOrder(requestId, googlePayHolder)
     }
 
     override fun answerCardHolderVerification(requestId: String, accepted: Boolean) {

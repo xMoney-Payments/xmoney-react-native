@@ -73,9 +73,16 @@ export type PaymentSheetEvent =
   | { type: 'ready' }
   | { type: 'processing'; isProcessing: boolean };
 
-/** Native `ApplePayEvent` / `GooglePayEvent` — ready / processing only. */
+/** Binding a new order failed after one was already bound. Pay stays locked until a later update succeeds. */
+export type UpdateFailedEvent = {
+  type: 'updateFailed';
+  error: PaymentError;
+};
+
+/** Native `ApplePayEvent` — ready / processing only. */
 export type ApplePayEvent = PaymentSheetEvent;
-export type GooglePayEvent = PaymentSheetEvent;
+/** Native `GooglePayEvent` — ready / processing, plus a later bind failure. */
+export type GooglePayEvent = PaymentSheetEvent | UpdateFailedEvent;
 
 export type AvailabilityEvent = {
   type: 'availability';
@@ -99,8 +106,14 @@ export type EmbeddedAvailabilityEvent = {
 };
 
 /** Embedded native `EmbeddedEvent` plus RN `availability` for property flags. */
-export type EmbeddedEvent = PaymentSheetEvent | EmbeddedAvailabilityEvent;
-export type WalletPayEvent = PaymentSheetEvent | AvailabilityEvent;
+export type EmbeddedEvent =
+  | PaymentSheetEvent
+  | EmbeddedAvailabilityEvent
+  | UpdateFailedEvent;
+export type WalletPayEvent =
+  | PaymentSheetEvent
+  | AvailabilityEvent
+  | UpdateFailedEvent;
 
 export interface AppearanceColors {
   primary?: string;

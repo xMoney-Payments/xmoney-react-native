@@ -2,7 +2,6 @@ package com.xmoney.reactnative
 
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.common.MapBuilder
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.annotations.ReactProp
@@ -28,12 +27,14 @@ class PlatformPayButtonViewManager : SimpleViewManager<PlatformPayButtonView>() 
         view.disabled = value
     }
 
-    override fun getCommandsMap(): MutableMap<String, Int> =
-        MapBuilder.of(
-            "prepare", COMMAND_PREPARE,
-            "updateOrder", COMMAND_UPDATE_ORDER,
-            "updateAppearance", COMMAND_UPDATE_APPEARANCE,
-        )
+    override fun getCommandsMap(): MutableMap<String, Int> = mutableMapOf(
+        "prepare" to COMMAND_PREPARE,
+        "updateOrder" to COMMAND_UPDATE_ORDER,
+        "beginUpdateOrder" to COMMAND_BEGIN_UPDATE_ORDER,
+        "resolveOrder" to COMMAND_RESOLVE_ORDER,
+        "rejectOrder" to COMMAND_REJECT_ORDER,
+        "updateAppearance" to COMMAND_UPDATE_APPEARANCE,
+    )
 
     override fun receiveCommand(
         root: PlatformPayButtonView,
@@ -47,6 +48,13 @@ class PlatformPayButtonViewManager : SimpleViewManager<PlatformPayButtonView>() 
                 args?.getString(1).orEmpty(),
                 args?.getString(2).orEmpty(),
             )
+            "beginUpdateOrder" -> root.beginUpdateOrder(args?.getString(0).orEmpty())
+            "resolveOrder" -> root.resolveOrder(
+                args?.getString(0).orEmpty(),
+                args?.getString(1).orEmpty(),
+                args?.getString(2).orEmpty(),
+            )
+            "rejectOrder" -> root.rejectOrder(args?.getString(0).orEmpty())
             "updateAppearance" -> root.updateAppearance(args?.getString(0).orEmpty())
         }
     }
@@ -63,6 +71,13 @@ class PlatformPayButtonViewManager : SimpleViewManager<PlatformPayButtonView>() 
                 args?.getString(1).orEmpty(),
                 args?.getString(2).orEmpty(),
             )
+            COMMAND_BEGIN_UPDATE_ORDER -> root.beginUpdateOrder(args?.getString(0).orEmpty())
+            COMMAND_RESOLVE_ORDER -> root.resolveOrder(
+                args?.getString(0).orEmpty(),
+                args?.getString(1).orEmpty(),
+                args?.getString(2).orEmpty(),
+            )
+            COMMAND_REJECT_ORDER -> root.rejectOrder(args?.getString(0).orEmpty())
             COMMAND_UPDATE_APPEARANCE -> root.updateAppearance(args?.getString(0).orEmpty())
         }
     }
@@ -75,6 +90,7 @@ class PlatformPayButtonViewManager : SimpleViewManager<PlatformPayButtonView>() 
             "onHeightChange",
             "onAvailability",
             "onOrderUpdated",
+            "onUpdateFailed",
         )
 
     companion object {
@@ -82,5 +98,8 @@ class PlatformPayButtonViewManager : SimpleViewManager<PlatformPayButtonView>() 
         const val COMMAND_PREPARE = 1
         const val COMMAND_UPDATE_ORDER = 2
         const val COMMAND_UPDATE_APPEARANCE = 3
+        const val COMMAND_BEGIN_UPDATE_ORDER = 4
+        const val COMMAND_RESOLVE_ORDER = 5
+        const val COMMAND_REJECT_ORDER = 6
     }
 }

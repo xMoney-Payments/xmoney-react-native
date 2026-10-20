@@ -15,6 +15,7 @@ import {
   defaultPaymentConfig,
   formatMoney,
   isNativeBoundEvent,
+  isSupersededUpdate,
 } from '../SampleHelpers';
 import {secrets} from '../secrets';
 import {useExampleTheme} from '../theme/ExampleTheme';
@@ -44,48 +45,69 @@ export function UpdateOrderSample({onBack}: {onBack: () => void}) {
   const [ready, setReady] = useState(false);
   const [canPay, setCanPay] = useState(true);
   const [consumed, setConsumed] = useState(false);
+  const [updateFailed, setUpdateFailed] = useState<string | null>(null);
+  const retryIntent = useRef<PaymentIntent | null>(null);
+  const requestRef = useRef(0);
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
   const configuration = useMemo(() => defaultPaymentConfig({dark}), [dark]);
 
   useEffect(() => {
     if (consumed) {
       return;
     }
+    const request = ++requestRef.current;
+    const amount = amountMinor;
+    const initial = intentRef.current == null;
     let cancelled = false;
-    const initial = intent == null;
-    const handle = setTimeout(
-      () => {
-        void (async () => {
-          if (initial) {
-            setLoading(true);
-          }
-          setError(null);
-          try {
-            const next = await DemoCheckoutBackend.createPaymentIntent({
-              amountMinor,
+    if (initial) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setError(null);
+    }
+    void (async () => {
+      try {
+        const element = elementRef.current;
+        if (!initial && element && intentRef.current) {
+          const next = await element.updateOrder(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            if (!element.isUpdateCurrent()) {
+              throw new Error('superseded');
+            }
+            return DemoCheckoutBackend.createPaymentIntent({
+              amountMinor: amount,
             });
-            if (cancelled) {
-              return;
-            }
-            if (elementRef.current && intent) {
-              await elementRef.current.updateOrder(next);
-            }
-            setIntent(next);
-          } catch (e) {
-            if (!cancelled) {
-              setError(e instanceof Error ? e.message : 'Could not create order');
-            }
-          } finally {
-            if (initial && !cancelled) {
-              setLoading(false);
-            }
+          });
+          if (cancelled || request !== requestRef.current) {
+            return;
           }
-        })();
-      },
-      initial ? 0 : 300
-    );
+          retryIntent.current = next;
+          setUpdateFailed(null);
+          setIntent(next);
+          return;
+        }
+        const next = await DemoCheckoutBackend.createPaymentIntent({
+          amountMinor: amount,
+        });
+        if (cancelled || request !== requestRef.current) {
+          return;
+        }
+        setIntent(next);
+      } catch (e) {
+        if (cancelled || request !== requestRef.current || isSupersededUpdate(e)) {
+          return;
+        }
+        setError(e instanceof Error ? e.message : 'Could not create order');
+      } finally {
+        if (initial && !cancelled && request === requestRef.current) {
+          setLoading(false);
+        }
+      }
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(handle);
+      requestRef.current += 1;
     };
     // Re-run when amount changes; intent identity is handled inside.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -94,7 +116,7 @@ export function UpdateOrderSample({onBack}: {onBack: () => void}) {
   return (
     <SampleScaffold
       title="Update order"
-      subtitle="updateOrder() a new PaymentIntent — Pay locked until Ready."
+      subtitle="Changing the amount locks Pay immediately, then binds the new order."
       onBack={onBack}
       showTestCards>
       <ScrollView contentContainerStyle={{gap: 16, paddingBottom: 32}}>
@@ -161,6 +183,9 @@ export function UpdateOrderSample({onBack}: {onBack: () => void}) {
                 if (isNativeBoundEvent(event)) {
                   setReady(true);
                 }
+                if (event.type === 'updateFailed') {
+                  setUpdateFailed(event.error.message);
+                }
                 if (event.type === 'availability') {
                   setCanPay(event.isInteractionEnabled);
                   if (event.isOrderConsumed) {
@@ -183,6 +208,29 @@ export function UpdateOrderSample({onBack}: {onBack: () => void}) {
           </MerchantReadyGate>
         ) : null}
         {error ? <ExampleStatusChip text={error} kind="error" /> : null}
+        {updateFailed ? (
+          <>
+            <ExampleStatusChip text={updateFailed} kind="error" />
+            <ExampleButton
+              label="Retry update"
+              variant="secondary"
+              onPress={() => {
+                const next = retryIntent.current;
+                if (!next || !elementRef.current) {
+                  return;
+                }
+                setUpdateFailed(null);
+                void elementRef.current.updateOrder(next).catch((reason) => {
+                  setUpdateFailed(
+                    reason instanceof Error
+                      ? reason.message
+                      : 'Could not update order'
+                  );
+                });
+              }}
+            />
+          </>
+        ) : null}
       </ScrollView>
     </SampleScaffold>
   );

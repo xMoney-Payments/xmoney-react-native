@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -17,8 +18,9 @@ import { toEmbeddedAvailabilityEvent } from '../availability';
 import NativePaymentElement, {
   Commands,
 } from '../specs/NativePaymentElement';
+import { sanitizePaymentError } from '../errors';
 import { parsePaymentResult } from '../parseResult';
-import { createOrderUpdateQueue } from './orderUpdates';
+import { createOrderUpdater } from './orderUpdater';
 import {
   appearanceSnapshot,
   intentSnapshot,
@@ -53,10 +55,18 @@ export type PaymentElementProps = {
 /**
  * `confirm()` submits the selected method when `card.submitButton.visible` is false.
  * Await `updateOrder` (or `availability.isInteractionEnabled`) before `confirm()`.
+ *
+ * `updateOrder(createOrder)` locks Pay before `createOrder` runs. Check
+ * `isUpdateCurrent` after a debounce so a superseded callback does not create
+ * an order.
  */
 export type PaymentElementRef = {
   confirm: () => void;
-  updateOrder: (intent: PaymentIntent) => Promise<void>;
+  updateOrder: {
+    (intent: PaymentIntent): Promise<void>;
+    (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
+  };
+  isUpdateCurrent: () => boolean;
   updateAppearance: (appearance: AppearanceConfig) => void;
   updateLocale: (locale: string) => void;
   updateStyle: (style: UserInterfaceStyle) => void;
@@ -90,7 +100,48 @@ export const PaymentElement = forwardRef<
     prepared: false,
     acked: false,
   });
-  const orderQueue = useMemo(() => createOrderUpdateQueue(), []);
+  const updater = useMemo(
+    () =>
+      createOrderUpdater({
+        attached: () => viewRef.current != null,
+        commands: {
+          updateOrder: (orderPayload, orderChecksum, requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.updateOrder(node, orderPayload, orderChecksum, requestId);
+            }
+          },
+          beginUpdateOrder: (requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.beginUpdateOrder(node, requestId);
+            }
+          },
+          resolveOrder: (orderPayload, orderChecksum, requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.resolveOrder(
+                node,
+                orderPayload,
+                orderChecksum,
+                requestId
+              );
+            }
+          },
+          rejectOrder: (requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.rejectOrder(node, requestId);
+            }
+          },
+        },
+        onBound: (bound) => {
+          liveKeys.current.intent = intentSnapshot(bound);
+        },
+      }),
+    []
+  );
+  useEffect(() => () => updater.detach(), [updater]);
   const chvId = useRef(createChvHandle()).current;
   const nativeConfiguration = useMemo(
     () => toNativeConfiguration(configuration, chvId),
@@ -98,14 +149,21 @@ export const PaymentElement = forwardRef<
   );
   const commands = useMemo(
     () => ({
-      prepare: Commands.prepare,
+      prepare: (
+        node: ElementRef<typeof NativePaymentElement>,
+        orderPayload: string,
+        orderChecksum: string
+      ) => {
+        updater.supersede();
+        Commands.prepare(node, orderPayload, orderChecksum);
+      },
       updateOrder: Commands.updateOrder,
       updateAppearance: Commands.updateAppearance,
       updateLocale: Commands.updateLocale,
       updateStyle: Commands.updateStyle,
       updateWalletAppearance: Commands.updateWalletAppearance,
     }),
-    []
+    [updater]
   );
   useNativePrepare(
     viewRef,
@@ -123,23 +181,13 @@ export const PaymentElement = forwardRef<
         Commands.confirm(node);
       }
     },
-    updateOrder: (nextIntent) => {
-      liveKeys.current.intent = intentSnapshot(nextIntent);
-      const node = viewRef.current;
-      if (!node) {
-        return Promise.reject(
-          new Error('PaymentElement is not mounted')
-        );
+    updateOrder: ((intentOrCreate: PaymentIntent | (() => Promise<PaymentIntent>)) => {
+      if (typeof intentOrCreate !== 'function') {
+        liveKeys.current.intent = intentSnapshot(intentOrCreate);
       }
-      return orderQueue.start((requestId) => {
-        Commands.updateOrder(
-          node,
-          nextIntent.orderPayload,
-          nextIntent.orderChecksum,
-          requestId
-        );
-      });
-    },
+      return updater.updateOrder(intentOrCreate);
+    }) as PaymentElementRef['updateOrder'],
+    isUpdateCurrent: () => updater.isUpdateCurrent(),
     updateAppearance: (appearance) => {
       liveKeys.current.appearance = appearanceSnapshot(
         configuration,
@@ -208,7 +256,18 @@ export const PaymentElement = forwardRef<
           success: boolean;
           error?: string;
         }>
-      ) => orderQueue.settle(event.nativeEvent)}
+      ) => updater.settle(event.nativeEvent)}
+      onUpdateFailed={(
+        event: NativeSyntheticEvent<{ code: string; message: string }>
+      ) =>
+        onEvent?.({
+          type: 'updateFailed',
+          error: sanitizePaymentError(
+            event.nativeEvent.code,
+            event.nativeEvent.message
+          ),
+        })
+      }
       onAvailability={(
         event: NativeSyntheticEvent<{
           isOrderConsumed: boolean;

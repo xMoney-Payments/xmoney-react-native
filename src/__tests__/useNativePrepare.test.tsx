@@ -16,7 +16,7 @@ function Probe({
   appearance,
   localeIsStructural,
   ignoreMethodAppearance,
-  layoutReady,
+  layoutReady = true,
   liveKeys,
 }: {
   configuration: PaymentConfig;
@@ -436,7 +436,7 @@ describe('useNativePrepare', () => {
     expect(cmds.updateAppearance).toHaveBeenCalledTimes(1);
   });
 
-  it('retries prepare on layout when native has not acked', async () => {
+  it('prepares once when the view gets its layout', async () => {
     const cmds = mockCommands();
     const liveKeys: {current: NativePrepareLiveKeys} = {
       current: {
@@ -460,11 +460,12 @@ describe('useNativePrepare', () => {
           configuration={configuration}
           intent={intent}
           commands={cmds}
+          layoutReady={false}
           liveKeys={liveKeys}
         />
       );
     });
-    expect(cmds.prepare).toHaveBeenCalledTimes(1);
+    expect(cmds.prepare).not.toHaveBeenCalled();
 
     await act(async () => {
       root?.update(
@@ -477,7 +478,7 @@ describe('useNativePrepare', () => {
         />
       );
     });
-    expect(cmds.prepare).toHaveBeenCalledTimes(2);
+    expect(cmds.prepare).toHaveBeenCalledTimes(1);
 
     markNativePrepareAcked(liveKeys);
     await act(async () => {
@@ -491,6 +492,7 @@ describe('useNativePrepare', () => {
         />
       );
     });
-    expect(cmds.prepare).toHaveBeenCalledTimes(2);
+    expect(cmds.prepare).toHaveBeenCalledTimes(1);
+    expect(cmds.updateOrder).not.toHaveBeenCalled();
   });
 });

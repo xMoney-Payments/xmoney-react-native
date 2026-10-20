@@ -1569,7 +1569,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - Yoga
   - SocketRocket (0.7.1)
-  - xmoney-react-native (0.0.1):
+  - xmoney-react-native (1.1.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1589,16 +1589,16 @@ PODS:
     - ReactCodegen
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
-    - XMoneyPaymentSheet (= 0.0.3)
+    - XMoneyPaymentSheet (= 1.1.0)
     - Yoga
-  - XMoneyPaymentSheet (0.0.3):
-    - XMoneyPaymentSheet/PaymentSheet (= 0.0.3)
-  - XMoneyPaymentSheet/ApplePay (0.0.3):
+  - XMoneyPaymentSheet (1.1.0):
+    - XMoneyPaymentSheet/PaymentSheet (= 1.1.0)
+  - XMoneyPaymentSheet/ApplePay (1.1.0):
     - XMoneyPaymentSheet/Core
-  - XMoneyPaymentSheet/Core (0.0.3)
-  - XMoneyPaymentSheet/PaymentElement (0.0.3):
+  - XMoneyPaymentSheet/Core (1.1.0)
+  - XMoneyPaymentSheet/PaymentElement (1.1.0):
     - XMoneyPaymentSheet/Core
-  - XMoneyPaymentSheet/PaymentSheet (0.0.3):
+  - XMoneyPaymentSheet/PaymentSheet (1.1.0):
     - XMoneyPaymentSheet/ApplePay
     - XMoneyPaymentSheet/Core
     - XMoneyPaymentSheet/PaymentElement
@@ -1888,10 +1888,10 @@ SPEC CHECKSUMS:
   ReactCommon: 0c097b53f03d6bf166edbcd0915da32f3015dd90
   RNSVG: 8126581b369adf6a0004b6a6cab1a55e3002d5b0
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  xmoney-react-native: 896871f9af7e5bec7058cdfb22279782b29c63c3
-  XMoneyPaymentSheet: d4af1c3de49b48a1555cc05aefcaefd10baaf18f
+  xmoney-react-native: 23db5dd1c7428cc1e218a878ae6b3ea01c57e1a5
+  XMoneyPaymentSheet: b62e52fa088c38991822ba99d73ecf498b58b3ef
   Yoga: afd04ff05ebe0121a00c468a8a3c8080221cb14c
 
 PODFILE CHECKSUM: bb6b9dc0e5bd8ea7d78728bddd2523721454f28c
 
-COCOAPODS: 1.17.0
+COCOAPODS: 1.15.2

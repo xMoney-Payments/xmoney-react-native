@@ -174,6 +174,35 @@ RCT_EXPORT_MODULE()
       }];
 }
 
+- (void)beginApplePayUpdateOrder:(NSString *)requestId
+                               resolve:(RCTPromiseResolveBlock)resolve
+                                reject:(RCTPromiseRejectBlock)reject
+{
+  [[XMoneyPaymentSheetHost shared]
+      beginApplePayUpdateOrder:requestId
+      onResolve:^(NSDictionary *result) {
+        resolve(result);
+      }
+      onReject:^(NSString *code, NSString *message) {
+        reject(code, message, nil);
+      }];
+}
+
+- (void)resolveApplePayOrder:(NSString *)requestId
+                orderPayload:(NSString *)orderPayload
+               orderChecksum:(NSString *)orderChecksum
+{
+  [[XMoneyPaymentSheetHost shared]
+      resolveApplePayOrder:requestId
+              orderPayload:orderPayload
+             orderChecksum:orderChecksum];
+}
+
+- (void)rejectApplePayOrder:(NSString *)requestId
+{
+  [[XMoneyPaymentSheetHost shared] rejectApplePayOrder:requestId];
+}
+
 - (void)updateGooglePayOrder:(NSDictionary *)intent
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
@@ -186,6 +215,35 @@ RCT_EXPORT_MODULE()
       onReject:^(NSString *code, NSString *message) {
         reject(code, message, nil);
       }];
+}
+
+- (void)beginGooglePayUpdateOrder:(NSString *)requestId
+                                resolve:(RCTPromiseResolveBlock)resolve
+                                 reject:(RCTPromiseRejectBlock)reject
+{
+  [[XMoneyPaymentSheetHost shared]
+      beginGooglePayUpdateOrder:requestId
+      onResolve:^(NSDictionary *result) {
+        resolve(result);
+      }
+      onReject:^(NSString *code, NSString *message) {
+        reject(code, message, nil);
+      }];
+}
+
+- (void)resolveGooglePayOrder:(NSString *)requestId
+                 orderPayload:(NSString *)orderPayload
+                orderChecksum:(NSString *)orderChecksum
+{
+  [[XMoneyPaymentSheetHost shared]
+      resolveGooglePayOrder:requestId
+               orderPayload:orderPayload
+              orderChecksum:orderChecksum];
+}
+
+- (void)rejectGooglePayOrder:(NSString *)requestId
+{
+  [[XMoneyPaymentSheetHost shared] rejectGooglePayOrder:requestId];
 }
 
 - (void)answerCardHolderVerification:(NSString *)requestId accepted:(BOOL)accepted
