@@ -37,6 +37,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # example depends on `file:..`; npm runs the parent's prepare (bob build) during install.
+      - run: npm ci
       - run: npm ci
         working-directory: example
       - run: ./gradlew app:assembleDebug -PnewArchEnabled=${{ matrix.new-architecture }}
@@ -60,6 +62,8 @@ jobs:
           ruby-version: '4.0'
           bundler-cache: true
           working-directory: example
+      # example depends on `file:..`; npm runs the parent's prepare (bob build) during install.
+      - run: npm ci
       - run: npm ci
         working-directory: example
       - run: bundle exec pod install --project-directory=ios
