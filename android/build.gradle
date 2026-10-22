@@ -24,7 +24,8 @@ def getExtOrDefault(name) {
 }
 
 def isNewArchitectureEnabled() {
-  return true
+  return rootProject.hasProperty("newArchEnabled") &&
+    rootProject.getProperty("newArchEnabled") == "true"
 }
 
 apply plugin: "com.android.library"

@@ -6,6 +6,7 @@ import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.UIManagerHelper
 import com.facebook.react.uimanager.events.Event
+import com.facebook.react.uimanager.events.RCTEventEmitter
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,6 +57,14 @@ internal object BridgeJson {
 internal fun View.emitNativeEvent(name: String, payload: WritableMap?) {
     val reactContext = context as? ReactContext ?: return
     if (id == View.NO_ID) return
+    // The legacy bridge delivers view events directly. Its frame dispatcher
+    // pauses while a payment sheet is open, so `ready` never reaches JS.
+    if (!reactContext.isBridgeless) {
+        reactContext
+            .getJSModule(RCTEventEmitter::class.java)
+            .receiveEvent(id, name, payload)
+        return
+    }
     val dispatcher = UIManagerHelper.getEventDispatcherForReactTag(reactContext, id) ?: return
     val surfaceId = UIManagerHelper.getSurfaceId(this)
     dispatcher.dispatchEvent(

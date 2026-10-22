@@ -19,3 +19,60 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run prepare
+
+  android:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        new-architecture: [true, false]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: example/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm ci
+        working-directory: example
+      - run: ./gradlew app:assembleDebug -PnewArchEnabled=${{ matrix.new-architecture }}
+        working-directory: example/android
+
+  ios:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        new-architecture: ['1', '0']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: example/package-lock.json
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+          working-directory: example
+      - run: npm ci
+        working-directory: example
+      - run: bundle exec pod install --project-directory=ios
+        working-directory: example
+        env:
+          RCT_NEW_ARCH_ENABLED: ${{ matrix.new-architecture }}
+      - run: >-
+          xcodebuild
+          -workspace ios/XMoneyExample.xcworkspace
+          -scheme XMoneyExample
+          -configuration Debug
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
+        working-directory: example

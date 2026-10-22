@@ -11,9 +11,11 @@ React Native SDK for [xMoney](https://xmoney.com) checkout. Three surfaces, one 
 
 ## Requirements
 
-- React Native New Architecture (`react-native` >= 0.76)
+- React Native >= 0.76, with the New Architecture or legacy architecture
 - iOS 15.0+
 - Android `minSdk` 23
+
+Legacy-architecture support applies to React Native 0.76–0.81 and will be removed in a future major release. React Native 0.82 and newer always use the New Architecture.
 
 ## Installation
 

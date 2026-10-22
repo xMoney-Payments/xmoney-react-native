@@ -47,6 +47,7 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
     private val updates = OrderUpdateLaunch()
     private var boundConfiguration: Map<String, Any?>? = null
     private var didSendReady = false
+    private var layoutScheduled = false
 
     var configuration: Map<String, Any?>? = null
 
@@ -126,6 +127,22 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
     fun confirm() {
         UiThreadUtil.runOnUiThread {
             controllerRef?.confirm()
+        }
+    }
+
+    // React Native parents drop requestLayout, so Compose content would keep
+    // the size it had before the form existed.
+    override fun requestLayout() {
+        super.requestLayout()
+        if (layoutScheduled) return
+        layoutScheduled = true
+        post {
+            layoutScheduled = false
+            composeView.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            )
+            composeView.layout(0, 0, composeView.measuredWidth, composeView.measuredHeight)
         }
     }
 

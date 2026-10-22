@@ -12,6 +12,7 @@ Pins native SDKs to CocoaPods `XMoneyPaymentSheet` **1.1.0** and Maven `com.xmon
 
 ### Added
 
+- Support for the React Native legacy architecture (`newArchEnabled=false`) on React Native 0.76–0.81.
 - `updateFailed` on Payment Element, wallet buttons, and imperative Google Pay when binding a new order fails after one was already bound. Pay stays locked on the previous order until a later bind succeeds.
 - `PAYMENT_IN_PROGRESS` when `updateOrder` asks for a different order during a charge.
 - `updateOrder(createOrder)` on Payment Element, wallet button refs, and imperative `ApplePay` / `GooglePay`. Pay locks before your server creates the next order, including during a debounce. If creation throws, the previous order stays payable. A newer call rejects the previous one with `SUPERSEDED_UPDATE_ORDER`. `isUpdateCurrent()` reports whether that callback is still the latest update.
