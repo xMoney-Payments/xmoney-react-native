@@ -255,6 +255,15 @@ export interface PaymentIntent {
   orderChecksum: string;
 }
 
+/**
+ * Passed into `updateOrder(createOrder)`. `isCurrent` is false once a newer
+ * update replaces this callback. `signal` aborts at the same time.
+ */
+export type UpdateOrderContext = {
+  isCurrent: () => boolean;
+  signal: AbortSignal;
+};
+
 export interface TransactionCustomer {
   id?: string;
   siteId?: string;

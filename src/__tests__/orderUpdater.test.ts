@@ -55,8 +55,13 @@ function harness(attached = true) {
 describe('createOrderUpdater', () => {
   it('updateOrder resolves after createOrder', async () => {
     const { calls, updater, bound } = harness();
-    const result = await updater.updateOrder(async () => intentA);
+    let current = false;
+    const result = await updater.updateOrder(async ({ isCurrent }) => {
+      current = isCurrent();
+      return intentA;
+    });
     expect(result).toEqual(intentA);
+    expect(current).toBe(true);
     expect(calls.filter((call) => !call.startsWith('begin:'))).toEqual([
       'beginUpdateOrder',
       'resolveOrder',
@@ -75,11 +80,6 @@ describe('createOrderUpdater', () => {
     expect(calls).toContain('rejectOrder');
     expect(calls).not.toContain('resolveOrder');
     expect(bound).toEqual([]);
-  });
-
-  it('is true outside an updateOrder callback', () => {
-    const { updater } = harness();
-    expect(updater.isUpdateCurrent()).toBe(true);
   });
 
   it('begin failure during createOrder is one caught error', async () => {
@@ -109,10 +109,10 @@ describe('createOrderUpdater', () => {
     });
     let created = false;
     await expect(
-      updater.updateOrder(async () => {
+      updater.updateOrder(async ({ isCurrent }) => {
         await Promise.resolve();
         await Promise.resolve();
-        if (!updater.isUpdateCurrent()) {
+        if (!isCurrent()) {
           throw new Error('superseded');
         }
         created = true;
@@ -154,10 +154,10 @@ describe('createOrderUpdater', () => {
     let created = false;
     let sawStale = false;
     await expect(
-      updater.updateOrder(async () => {
+      updater.updateOrder(async ({ isCurrent }) => {
         await Promise.resolve();
         await Promise.resolve();
-        sawStale = !updater.isUpdateCurrent();
+        sawStale = !isCurrent();
         if (sawStale) {
           throw new Error('superseded');
         }
@@ -178,10 +178,10 @@ describe('createOrderUpdater', () => {
     const gate = deferred();
     let created = false;
     let sawStale = false;
-    const first = updater.updateOrder(async () => {
+    const first = updater.updateOrder(async ({ isCurrent }) => {
       await gate.promise;
-      sawStale = !updater.isUpdateCurrent();
-      if (!updater.isUpdateCurrent()) {
+      sawStale = !isCurrent();
+      if (!isCurrent()) {
         throw new Error('superseded');
       }
       created = true;
@@ -199,6 +199,173 @@ describe('createOrderUpdater', () => {
     expect(calls.filter((call) => call === 'resolveOrder')).toEqual([
       'resolveOrder',
     ]);
+  });
+
+  it('rejects the first intent when native never reports it', async () => {
+    const requestIds: string[] = [];
+    let updater: OrderUpdater;
+    updater = createOrderUpdater({
+      attached: () => true,
+      commands: {
+        updateOrder: (_payload, _checksum, requestId) => {
+          requestIds.push(requestId);
+        },
+        beginUpdateOrder: () => undefined,
+        resolveOrder: () => undefined,
+        rejectOrder: () => undefined,
+      },
+    });
+    const first = updater.updateOrder(intentA);
+    const second = updater.updateOrder(intentB);
+    await expect(first).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+      message: STABLE_MESSAGES.SUPERSEDED_UPDATE_ORDER,
+    });
+    const secondId = requestIds[1];
+    expect(secondId).toBeDefined();
+    updater.settle({ requestId: secondId as string, success: true });
+    await expect(second).resolves.toBeUndefined();
+    expect(requestIds).toHaveLength(2);
+  });
+
+  it('rejects createOrder when a later intent is never answered for the first id', async () => {
+    const gate = deferred();
+    let began = '';
+    let intentId = '';
+    let updater: OrderUpdater;
+    updater = createOrderUpdater({
+      attached: () => true,
+      commands: {
+        updateOrder: (_payload, _checksum, requestId) => {
+          intentId = requestId;
+        },
+        beginUpdateOrder: (requestId) => {
+          began = requestId;
+        },
+        resolveOrder: () => undefined,
+        rejectOrder: () => undefined,
+      },
+    });
+    const first = updater.updateOrder(async () => {
+      await gate.promise;
+      return intentA;
+    });
+    const second = updater.updateOrder(intentB);
+    gate.resolve();
+    await expect(first).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+    });
+    updater.settle({ requestId: intentId, success: true });
+    await expect(second).resolves.toBeUndefined();
+    expect(began.startsWith('bw_')).toBe(true);
+  });
+
+  it('aborts the signal when a newer update starts', async () => {
+    const { updater } = harness();
+    const gate = deferred();
+    let signal: AbortSignal | undefined;
+    const first = updater.updateOrder(async (ctx) => {
+      signal = ctx.signal;
+      await gate.promise;
+      return intentA;
+    });
+    const second = updater.updateOrder(async () => intentB);
+    expect(signal?.aborted).toBe(true);
+    gate.resolve();
+    await expect(first).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+    });
+    await expect(second).resolves.toEqual(intentB);
+  });
+
+  it('a callback that throws after it was superseded still rejects SUPERSEDED', async () => {
+    const { updater } = harness();
+    const gate = deferred();
+    const first = updater.updateOrder(async ({ isCurrent }) => {
+      await gate.promise;
+      if (!isCurrent()) {
+        throw new Error('late failure');
+      }
+      return intentA;
+    });
+    const second = updater.updateOrder(async () => intentB);
+    gate.resolve();
+    await expect(first).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+      message: STABLE_MESSAGES.SUPERSEDED_UPDATE_ORDER,
+    });
+    await expect(second).resolves.toEqual(intentB);
+  });
+
+  it('rejects an empty intent without binding it', async () => {
+    const { calls, updater, bound } = harness();
+    await expect(
+      updater.updateOrder(async () => ({
+        orderPayload: '',
+        orderChecksum: '',
+      }))
+    ).rejects.toMatchObject({
+      code: 'ORDER_CREATION_FAILED',
+      message: STABLE_MESSAGES.ORDER_CREATION_FAILED,
+    });
+    expect(calls).toContain('rejectOrder');
+    expect(calls).not.toContain('resolveOrder');
+    expect(bound).toEqual([]);
+  });
+
+  it('supersede settles an in-flight createOrder and a waiting intent', async () => {
+    const { updater } = harness();
+    const waiting = updater.updateOrder(intentA);
+    const creating = updater.updateOrder(async ({ signal }) => {
+      await new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+      return intentB;
+    });
+    updater.supersede();
+    await expect(waiting).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+    });
+    await expect(creating).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+    });
+  });
+
+  it('detach during createOrder rejects the call', async () => {
+    const { updater } = harness();
+    const pending = updater.updateOrder(async ({ signal }) => {
+      await new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+      return intentA;
+    });
+    updater.detach();
+    await expect(pending).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+    });
+  });
+
+  it('detach during the bind phase rejects the call', async () => {
+    let updater: OrderUpdater;
+    let sawResolve = false;
+    updater = createOrderUpdater({
+      attached: () => true,
+      commands: {
+        updateOrder: () => undefined,
+        beginUpdateOrder: () => undefined,
+        resolveOrder: () => {
+          sawResolve = true;
+        },
+        rejectOrder: () => undefined,
+      },
+    });
+    const pending = updater.updateOrder(async () => intentA);
+    await Promise.resolve();
+    expect(sawResolve).toBe(true);
+    updater.detach();
+    await expect(pending).rejects.toMatchObject({
+      code: 'SUPERSEDED_UPDATE_ORDER',
+    });
   });
 
   it('throws NOT_INITIALIZED when the view is gone', async () => {

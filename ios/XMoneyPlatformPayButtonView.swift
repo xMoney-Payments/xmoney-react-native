@@ -28,6 +28,11 @@ public final class XMoneyPlatformPayButtonView: UIView {
     private var orderChecksum = ""
     private var boundPayload = ""
     private var boundChecksum = ""
+    /// The order the last prepare or update asked for, which may still be binding.
+    private var requestedPayload = ""
+    private var requestedChecksum = ""
+    /// A prop-driven order that arrived during a charge. Bound once Pay unlocks.
+    private var pendingIntent: PaymentIntent?
     private var boundConfig: [String: Any] = [:]
     private var hasPrepared = false
     private var didSendReady = false
@@ -38,10 +43,6 @@ public final class XMoneyPlatformPayButtonView: UIView {
     private var hasBoundOrder = false
     private var lastReportedHeight: CGFloat = -1
     private var updateTask: Task<Void, Never>?
-    private var pendingIntent: PaymentIntent?
-    /// True while `updateOrder(createOrder)` holds the native lock.
-    private var creatingOrder = false
-    private var createToken = 0
     /// Binds the mount order. Cancelled when a JS update replaces it.
     private var mountTask: Task<Void, Never>?
     private let orders = PendingOrders()
@@ -96,6 +97,8 @@ public final class XMoneyPlatformPayButtonView: UIView {
         self.orderChecksum = nextChecksum
         self.boundPayload = nextPayload
         self.boundChecksum = nextChecksum
+        self.requestedPayload = nextPayload
+        self.requestedChecksum = nextChecksum
         self.boundConfig = nextConfig
         self.hasPrepared = true
         bind()
@@ -143,6 +146,7 @@ public final class XMoneyPlatformPayButtonView: UIView {
     }
 
     private func bind() {
+        pendingIntent = nil
         let config = BridgeMaps.stringMap(configuration) ?? [:]
         BridgeCatch.run {
             let parsed = BridgeConfigParser.parse(
@@ -198,21 +202,37 @@ public final class XMoneyPlatformPayButtonView: UIView {
             orderPayload: orderPayload,
             orderChecksum: orderChecksum
         )
-        if requestId.isEmpty, creatingOrder {
-            pendingIntent = nextIntent
+        // An imperative call is newer than a deferred prop change.
+        if !requestId.isEmpty {
+            pendingIntent = nil
+        }
+        if requestId.isEmpty,
+           nextIntent.orderPayload == requestedPayload,
+           nextIntent.orderChecksum == requestedChecksum {
             return
         }
+        requestedPayload = nextIntent.orderPayload
+        requestedChecksum = nextIntent.orderChecksum
         updateTask?.cancel()
         mountTask?.cancel()
         button.isEnabled = false
         emitAvailability()
         updateTask = Task { @MainActor [weak self] in
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+            guard !Task.isCancelled else {
+                self.emitOrderUpdated(
+                    requestId: requestId,
+                    success: false,
+                    error: "SUPERSEDED_UPDATE_ORDER"
+                )
+                return
+            }
             do {
                 try await applePay.updateOrder(intent: nextIntent)
                 self.intent = nextIntent
                 self.boundPayload = nextIntent.orderPayload
                 self.boundChecksum = nextIntent.orderChecksum
+                self.pendingIntent = nil
                 self.hasBoundOrder = true
                 self.syncEnabled()
                 self.emitAvailability()
@@ -229,10 +249,22 @@ public final class XMoneyPlatformPayButtonView: UIView {
                 self.syncEnabled()
                 self.emitAvailability()
                 let mapped = BridgeCatch.codeMessage(error)
+                if requestId.isEmpty, mapped.code == "PAYMENT_IN_PROGRESS" {
+                    self.pendingIntent = nextIntent
+                }
                 self.reportUpdateFailure(code: mapped.code, message: mapped.message)
                 self.emitOrderUpdated(requestId: requestId, success: false, error: mapped.code)
             }
         }
+    }
+
+    /// A prop-driven update that arrived during a charge is retried once Pay unlocks.
+    private func retryPendingIntent() {
+        guard let pendingIntent else { return }
+        self.pendingIntent = nil
+        orderPayload = pendingIntent.orderPayload
+        orderChecksum = pendingIntent.orderChecksum
+        runUpdateOrder(requestId: "")
     }
 
     private func beginUpdateOrder(requestId: String) {
@@ -250,21 +282,14 @@ public final class XMoneyPlatformPayButtonView: UIView {
             emitOrderUpdated(requestId: requestId, success: false, error: "NOT_INITIALIZED")
             return
         }
-        createToken += 1
-        let token = createToken
-        creatingOrder = true
+        pendingIntent = nil
         updateTask?.cancel()
         mountTask?.cancel()
         button.isEnabled = false
         emitAvailability()
         updateTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer {
-                self.orders.close(requestId)
-                if self.createToken == token {
-                    self.creatingOrder = false
-                }
-            }
+            defer { self.orders.close(requestId) }
             guard !Task.isCancelled else {
                 self.emitOrderUpdated(
                     requestId: requestId,
@@ -292,12 +317,13 @@ public final class XMoneyPlatformPayButtonView: UIView {
                 self.orderChecksum = bound.orderChecksum
                 self.boundPayload = bound.orderPayload
                 self.boundChecksum = bound.orderChecksum
+                self.requestedPayload = bound.orderPayload
+                self.requestedChecksum = bound.orderChecksum
                 self.hasBoundOrder = true
                 self.syncEnabled()
                 self.emitAvailability()
                 self.publishButtonReady()
                 self.emitOrderUpdated(requestId: requestId, success: true, error: nil)
-                self.applyPendingIntent()
             } catch is CancellationError {
                 self.syncEnabled()
                 self.emitAvailability()
@@ -314,26 +340,14 @@ public final class XMoneyPlatformPayButtonView: UIView {
                     success: false,
                     error: "ORDER_CREATION_FAILED"
                 )
-                self.applyPendingIntent()
             } catch {
                 self.syncEnabled()
                 self.emitAvailability()
                 let mapped = BridgeCatch.codeMessage(error)
                 self.reportUpdateFailure(code: mapped.code, message: mapped.message)
                 self.emitOrderUpdated(requestId: requestId, success: false, error: mapped.code)
-                self.applyPendingIntent()
             }
         }
-    }
-
-    /// Applies a prop-driven intent that arrived while `updateOrder(createOrder)` held the lock.
-    private func applyPendingIntent() {
-        guard let pendingIntent else { return }
-        creatingOrder = false
-        self.pendingIntent = nil
-        orderPayload = pendingIntent.orderPayload
-        orderChecksum = pendingIntent.orderChecksum
-        runUpdateOrder(requestId: "")
     }
 
     /// A charge in progress is neither. The first bind is a payment result,
@@ -363,6 +377,7 @@ public final class XMoneyPlatformPayButtonView: UIView {
         applePay = ApplePay(configuration: paymentConfig) { [weak self] result in
             self?.onResult?(["resultJson": BridgeResults.resultJSON(result)])
             self?.emitAvailability()
+            self?.retryPendingIntent()
         }
     }
 
@@ -393,6 +408,9 @@ public final class XMoneyPlatformPayButtonView: UIView {
                     break
                 case let .processing(isProcessing):
                     self?.onProcessing?(["isProcessing": isProcessing])
+                    if !isProcessing {
+                        self?.retryPendingIntent()
+                    }
                 }
                 self?.emitAvailability()
             }

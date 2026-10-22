@@ -40,6 +40,7 @@ import type {
   PaymentConfig,
   PaymentIntent,
   PaymentResult,
+  UpdateOrderContext,
   WalletPayEvent,
 } from '../types';
 
@@ -56,9 +57,10 @@ export type WalletPayButtonProps = {
 export type WalletPayButtonRef = {
   updateOrder: {
     (intent: PaymentIntent): Promise<void>;
-    (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
+    (
+      createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>
+    ): Promise<PaymentIntent>;
   };
-  isUpdateCurrent: () => boolean;
   updateAppearance: (
     appearance: ApplePayAppearance | GooglePayAppearance
   ) => void;
@@ -89,6 +91,7 @@ export const WalletPayButton = forwardRef<
   const [layoutReady, setLayoutReady] = useState(false);
   const liveKeys = useRef<NativePrepareLiveKeys>({
     intent: '',
+    propIntent: '',
     appearance: '',
     locale: '',
     style: '',
@@ -183,13 +186,16 @@ export const WalletPayButton = forwardRef<
   );
 
   useImperativeHandle(ref, () => ({
-    updateOrder: ((intentOrCreate: PaymentIntent | (() => Promise<PaymentIntent>)) => {
+    updateOrder: ((
+      intentOrCreate:
+        | PaymentIntent
+        | ((ctx: UpdateOrderContext) => Promise<PaymentIntent>)
+    ) => {
       if (typeof intentOrCreate !== 'function') {
         liveKeys.current.intent = intentSnapshot(intentOrCreate);
       }
       return updater.updateOrder(intentOrCreate);
     }) as WalletPayButtonRef['updateOrder'],
-    isUpdateCurrent: () => updater.isUpdateCurrent(),
     updateAppearance: (nextAppearance) => {
       liveKeys.current.appearance = appearanceSnapshot(
         resolvedConfiguration,
@@ -227,9 +233,13 @@ export const WalletPayButton = forwardRef<
           isProcessing: event.nativeEvent.isProcessing,
         })
       }
-      onResult={(event: NativeSyntheticEvent<{ resultJson: string }>) =>
-        onResult?.(parsePaymentResult(event.nativeEvent.resultJson))
-      }
+      onResult={(event: NativeSyntheticEvent<{ resultJson: string }>) => {
+        const result = parsePaymentResult(event.nativeEvent.resultJson);
+        if (result.status === 'failed') {
+          markNativePrepareAcked(liveKeys);
+        }
+        onResult?.(result);
+      }}
       onOrderUpdated={(
         event: NativeSyntheticEvent<{
           requestId: string;
@@ -256,7 +266,6 @@ export const WalletPayButton = forwardRef<
           isInteractionEnabled: boolean;
         }>
       ) => {
-        markNativePrepareAcked(liveKeys);
         onEvent?.(toAvailabilityEvent(event.nativeEvent));
       }}
       onHeightChange={(event: NativeSyntheticEvent<{ height: number }>) => {

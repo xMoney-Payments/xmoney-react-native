@@ -21,6 +21,7 @@ import type {
   PaymentConfig,
   PaymentIntent,
   PaymentResult,
+  UpdateOrderContext,
   WalletState,
 } from './types';
 
@@ -65,8 +66,8 @@ function unsupported(): PaymentResult {
  * present the same intent again.
  *
  * `updateOrder(intent)` rebinds the open host. `updateOrder(createOrder)` locks
- * the wallet before the callback returns. Call after `present`, while the
- * overlay is still open. `isUpdateCurrent()` is false inside a superseded callback.
+ * the wallet when the native call runs. Call after `present`, while the
+ * overlay is still open. The callback receives `{ isCurrent, signal }`.
  *
  * `getState(intent?)` probes native availability. Pass `intent` or call after
  * `present`. After `init` only, flags stay `false`. `isAvailable` is site/config;
@@ -111,7 +112,8 @@ export const GooglePay = {
 
   /**
    * `updateOrder(intent)` rebinds a signed order. `updateOrder(createOrder)`
-   * locks the wallet first and returns the bound intent. Call after `present`.
+   * locks the wallet when native receives the call and returns the bound
+   * intent. Call after `present`, while the overlay is open.
    */
   updateOrder: (async (intentOrCreate) => {
     getModule();
@@ -121,15 +123,13 @@ export const GooglePay = {
         'Google Pay is only available on Android.'
       );
     }
+    if (typeof intentOrCreate === 'function' && !session.inFlight) {
+      throw new XMoneyPaymentError('GOOGLE_PAY', 'Google Pay is not presented');
+    }
     return orderUpdater().updateOrder(intentOrCreate);
   }) as {
     (intent: PaymentIntent): Promise<void>;
-    (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
-  },
-
-  /** False once a newer `updateOrder` has replaced the callback that is running. */
-  isUpdateCurrent(): boolean {
-    return orderUpdater().isUpdateCurrent();
+    (createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>): Promise<PaymentIntent>;
   },
 
   dismiss(): void {

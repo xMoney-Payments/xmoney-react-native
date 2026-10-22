@@ -1,7 +1,7 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { create, act } from 'react-test-renderer';
 import {
-  markNativePrepareAcked,
   useNativePrepare,
   type NativePrepareLiveKeys,
   type NativeViewCommands,
@@ -329,6 +329,61 @@ describe('useNativePrepare', () => {
     expect(cmds.updateOrder).not.toHaveBeenCalled();
   });
 
+  it('does not rebind a stale intent prop after a newer order is bound', async () => {
+    const cmds = mockCommands();
+    const liveKeys: { current: NativePrepareLiveKeys } = {
+      current: {
+        intent: '',
+        propIntent: '',
+        appearance: '',
+        locale: '',
+        style: '',
+        walletAppearance: '',
+        structural: '',
+        prepared: false,
+        acked: false,
+      },
+    };
+    const intent = { orderPayload: 'a', orderChecksum: '1' };
+    let root: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      root = create(
+        <Probe
+          configuration={{
+            publicKey: 'pk_test_x',
+            options: { style: 'alwaysLight' },
+          }}
+          intent={intent}
+          commands={cmds}
+          liveKeys={liveKeys}
+          ignoreMethodAppearance
+        />
+      );
+    });
+    liveKeys.current.intent = JSON.stringify({
+      orderPayload: 'b',
+      orderChecksum: '2',
+    });
+    await act(async () => {
+      root?.update(
+        <Probe
+          configuration={{
+            publicKey: 'pk_test_x',
+            options: { style: 'alwaysDark' },
+          }}
+          intent={intent}
+          commands={cmds}
+          liveKeys={liveKeys}
+          ignoreMethodAppearance
+        />
+      );
+    });
+    expect(cmds.prepare).toHaveBeenCalledTimes(1);
+    expect(cmds.updateStyle).toHaveBeenCalledTimes(1);
+    expect(cmds.updateOrder).not.toHaveBeenCalled();
+  });
+
   it('dispatches updateWalletAppearance when only wallet appearance changes', async () => {
     const cmds = mockCommands();
     let root: ReturnType<typeof create> | undefined;
@@ -441,6 +496,7 @@ describe('useNativePrepare', () => {
     const liveKeys: {current: NativePrepareLiveKeys} = {
       current: {
         intent: '',
+        propIntent: '',
         appearance: '',
         locale: '',
         style: '',
@@ -480,7 +536,6 @@ describe('useNativePrepare', () => {
     });
     expect(cmds.prepare).toHaveBeenCalledTimes(1);
 
-    markNativePrepareAcked(liveKeys);
     await act(async () => {
       root?.update(
         <Probe
@@ -494,5 +549,100 @@ describe('useNativePrepare', () => {
     });
     expect(cmds.prepare).toHaveBeenCalledTimes(1);
     expect(cmds.updateOrder).not.toHaveBeenCalled();
+  });
+
+  it('retries prepare on Android until the view acks, without updateOrder', async () => {
+    const previous = Platform.OS;
+    Platform.OS = 'android';
+    jest.useFakeTimers();
+    const cmds = mockCommands();
+    const liveKeys: { current: NativePrepareLiveKeys } = {
+      current: {
+        intent: '',
+        propIntent: '',
+        appearance: '',
+        locale: '',
+        style: '',
+        walletAppearance: '',
+        structural: '',
+        prepared: false,
+        acked: false,
+      },
+    };
+    try {
+      let root: ReturnType<typeof create> | undefined;
+      await act(async () => {
+        root = create(
+          <Probe
+            configuration={{ publicKey: 'pk_test_x' }}
+            intent={{ orderPayload: 'p', orderChecksum: 'c' }}
+            commands={cmds}
+            liveKeys={liveKeys}
+          />
+        );
+      });
+      expect(cmds.prepare).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        jest.advanceTimersByTime(400);
+      });
+      expect(cmds.prepare).toHaveBeenCalledTimes(2);
+      expect(cmds.updateOrder).not.toHaveBeenCalled();
+
+      liveKeys.current.acked = true;
+      await act(async () => {
+        jest.advanceTimersByTime(4000);
+      });
+      expect(cmds.prepare).toHaveBeenCalledTimes(2);
+      root?.unmount();
+    } finally {
+      jest.useRealTimers();
+      Platform.OS = previous;
+    }
+  });
+
+  it('stops the Android prepare retry once a newer order is bound', async () => {
+    const previous = Platform.OS;
+    Platform.OS = 'android';
+    jest.useFakeTimers();
+    const cmds = mockCommands();
+    const liveKeys: { current: NativePrepareLiveKeys } = {
+      current: {
+        intent: '',
+        propIntent: '',
+        appearance: '',
+        locale: '',
+        style: '',
+        walletAppearance: '',
+        structural: '',
+        prepared: false,
+        acked: false,
+      },
+    };
+    try {
+      let root: ReturnType<typeof create> | undefined;
+      await act(async () => {
+        root = create(
+          <Probe
+            configuration={{ publicKey: 'pk_test_x' }}
+            intent={{ orderPayload: 'a', orderChecksum: 'ca' }}
+            commands={cmds}
+            liveKeys={liveKeys}
+          />
+        );
+      });
+      expect(cmds.prepare).toHaveBeenCalledTimes(1);
+
+      liveKeys.current.intent = 'b|cb';
+      await act(async () => {
+        jest.advanceTimersByTime(4000);
+      });
+      expect(cmds.prepare).toHaveBeenCalledTimes(1);
+      expect(cmds.updateOrder).not.toHaveBeenCalled();
+      root?.unmount();
+    } finally {
+      jest.useRealTimers();
+      Platform.OS = previous;
+    }
   });
 });

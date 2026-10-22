@@ -1,5 +1,6 @@
 import {useState} from 'react';
-import {SafeAreaView, StatusBar, StyleSheet} from 'react-native';
+import {StatusBar, StyleSheet} from 'react-native';
+import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import {CardHolderVerificationSample} from './advanced/CardHolderVerificationSample';
 import {MerchantPaySample} from './advanced/MerchantPaySample';
 import {UpdateOrderSample} from './advanced/UpdateOrderSample';
@@ -54,9 +55,11 @@ function Root() {
 
 export default function App() {
   return (
-    <ExampleThemeProvider>
-      <Root />
-    </ExampleThemeProvider>
+    <SafeAreaProvider>
+      <ExampleThemeProvider>
+        <Root />
+      </ExampleThemeProvider>
+    </SafeAreaProvider>
   );
 }
 

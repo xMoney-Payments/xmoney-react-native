@@ -20,13 +20,13 @@ public final class XMoneyPaymentElementView: UIView {
     private var orderChecksum = ""
     private var boundPayload = ""
     private var boundChecksum = ""
+    /// The order the last prepare or update asked for, which may still be binding.
+    private var requestedPayload = ""
+    private var requestedChecksum = ""
     private var boundConfig: [String: Any] = [:]
     private var hasPrepared = false
     private var prepareTask: Task<Void, Never>?
     private var pendingIntent: PaymentIntent?
-    /// True while `updateOrder(createOrder)` holds the native lock.
-    private var creatingOrder = false
-    private var createToken = 0
     private var lastReportedHeight: CGFloat = -1
     /// `onReady` is sent once per mount. A failed first load is `onResult`.
     private var didSendReady = false
@@ -64,6 +64,8 @@ public final class XMoneyPaymentElementView: UIView {
         self.orderChecksum = nextChecksum
         self.boundPayload = nextPayload
         self.boundChecksum = nextChecksum
+        self.requestedPayload = nextPayload
+        self.requestedChecksum = nextChecksum
         self.boundConfig = nextConfig
         self.hasPrepared = true
         bind(requestId: "")
@@ -150,6 +152,7 @@ public final class XMoneyPaymentElementView: UIView {
     }
 
     private func bind(requestId: String) {
+        pendingIntent = nil
         let config = BridgeMaps.stringMap(configuration) ?? [:]
         BridgeCatch.run {
             let (nativeConfig, intent) = BridgeConfigParser.parse(
@@ -177,15 +180,34 @@ public final class XMoneyPaymentElementView: UIView {
             orderPayload: orderPayload,
             orderChecksum: orderChecksum
         )
-        if requestId.isEmpty, creatingOrder {
-            pendingIntent = intent
+        // An imperative call is newer than a deferred prop change.
+        if !requestId.isEmpty {
+            pendingIntent = nil
+        }
+        if requestId.isEmpty,
+           intent.orderPayload == requestedPayload,
+           intent.orderChecksum == requestedChecksum {
             return
         }
+        requestedPayload = intent.orderPayload
+        requestedChecksum = intent.orderChecksum
         prepareTask?.cancel()
         prepareTask = Task { @MainActor [weak self] in
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+            guard !Task.isCancelled else {
+                self.emitOrderUpdated(
+                    requestId: requestId,
+                    success: false,
+                    error: "SUPERSEDED_UPDATE_ORDER"
+                )
+                return
+            }
             do {
                 try await element.updateOrder(intent: intent)
+                self.orderPayload = intent.orderPayload
+                self.orderChecksum = intent.orderChecksum
+                self.boundPayload = intent.orderPayload
+                self.boundChecksum = intent.orderChecksum
                 self.pendingIntent = nil
                 self.reportHeight()
                 self.emitAvailability()
@@ -225,18 +247,11 @@ public final class XMoneyPaymentElementView: UIView {
             emitOrderUpdated(requestId: requestId, success: false, error: "NOT_INITIALIZED")
             return
         }
-        createToken += 1
-        let token = createToken
-        creatingOrder = true
+        pendingIntent = nil
         prepareTask?.cancel()
         prepareTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer {
-                self.orders.close(requestId)
-                if self.createToken == token {
-                    self.creatingOrder = false
-                }
-            }
+            defer { self.orders.close(requestId) }
             guard !Task.isCancelled else {
                 self.emitOrderUpdated(
                     requestId: requestId,
@@ -263,10 +278,11 @@ public final class XMoneyPaymentElementView: UIView {
                 self.orderChecksum = bound.orderChecksum
                 self.boundPayload = bound.orderPayload
                 self.boundChecksum = bound.orderChecksum
+                self.requestedPayload = bound.orderPayload
+                self.requestedChecksum = bound.orderChecksum
                 self.reportHeight()
                 self.emitAvailability()
                 self.emitOrderUpdated(requestId: requestId, success: true, error: nil)
-                self.creatingOrder = false
                 self.retryPendingIntent()
             } catch is CancellationError {
                 self.emitOrderUpdated(
@@ -281,13 +297,11 @@ public final class XMoneyPaymentElementView: UIView {
                     success: false,
                     error: "ORDER_CREATION_FAILED"
                 )
-                self.creatingOrder = false
                 self.retryPendingIntent()
             } catch {
                 let mapped = BridgeCatch.codeMessage(error)
                 self.reportLoadFailureIfNeeded(code: mapped.code, message: mapped.message)
                 self.emitOrderUpdated(requestId: requestId, success: false, error: mapped.code)
-                self.creatingOrder = false
                 self.retryPendingIntent()
             }
         }
@@ -310,6 +324,10 @@ public final class XMoneyPaymentElementView: UIView {
             guard let self, !Task.isCancelled else { return }
             do {
                 try await element.updateOrder(intent: pendingIntent)
+                self.orderPayload = pendingIntent.orderPayload
+                self.orderChecksum = pendingIntent.orderChecksum
+                self.boundPayload = pendingIntent.orderPayload
+                self.boundChecksum = pendingIntent.orderChecksum
                 self.reportHeight()
                 self.emitAvailability()
             } catch is CancellationError {

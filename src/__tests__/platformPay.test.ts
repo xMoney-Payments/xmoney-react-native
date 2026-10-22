@@ -263,8 +263,22 @@ describe('ApplePay / GooglePay', () => {
     expect(updateApplePayOrder).not.toHaveBeenCalled();
   });
 
+  it('GooglePay.updateOrder(createOrder) does not run the callback when the overlay is closed', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'android' });
+    const createOrder = jest.fn(async () => intent);
+    await expect(GooglePay.updateOrder(createOrder)).rejects.toMatchObject({
+      code: 'GOOGLE_PAY',
+      message: 'Google Pay is not presented',
+    });
+    expect(createOrder).not.toHaveBeenCalled();
+    expect(beginGooglePayUpdateOrder).not.toHaveBeenCalled();
+  });
+
   it('GooglePay.updateOrder(createOrder) locks before the callback on Android', async () => {
     Object.defineProperty(Platform, 'OS', { value: 'android' });
+    presentGooglePay.mockImplementation(() => new Promise(() => {}));
+    const open = GooglePay.present(intent);
+    expect(open).toBeInstanceOf(Promise);
     let finish: () => void = () => {};
     beginGooglePayUpdateOrder.mockImplementation(
       () =>

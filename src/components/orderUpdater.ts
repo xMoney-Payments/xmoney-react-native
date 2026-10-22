@@ -1,5 +1,5 @@
 import { STABLE_MESSAGES, XMoneyPaymentError } from '../errors';
-import type { PaymentIntent } from '../types';
+import type { PaymentIntent, UpdateOrderContext } from '../types';
 
 export type OrderUpdatedEvent = {
   requestId: string;
@@ -10,12 +10,16 @@ export type OrderUpdatedEvent = {
 /** Native `updateOrder` overloads: a signed intent, or a callback that creates one. */
 export type UpdateOrder = {
   (intent: PaymentIntent): Promise<void>;
-  (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
+  (
+    createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>
+  ): Promise<PaymentIntent>;
 };
 
+export type CreateOrder = (ctx: UpdateOrderContext) => Promise<PaymentIntent>;
+
 export function isCreateOrder(
-  value: PaymentIntent | (() => Promise<PaymentIntent>)
-): value is () => Promise<PaymentIntent> {
+  value: PaymentIntent | CreateOrder
+): value is CreateOrder {
   return typeof value === 'function';
 }
 
@@ -39,73 +43,7 @@ type Waiter = {
   reject: (error: XMoneyPaymentError) => void;
 };
 
-type Frame = {
-  token: object;
-  seq: number;
-};
-
 let nextRequest = 0;
-let activeFrame: Frame | null = null;
-let framePropagationInstalled = false;
-
-/**
- * Keeps [activeFrame] on the async callback that started inside
- * `updateOrder(createOrder)`, including after `await`. React Native has no zones, so
- * continuations capture the frame when `Promise.then` is registered.
- */
-function installFramePropagation(): void {
-  if (framePropagationInstalled) {
-    return;
-  }
-  // Async callbacks have no zone in React Native. Continuations capture the
-  // active update so `isUpdateCurrent` stays tied to the callback that awaited.
-  framePropagationInstalled = true;
-  const original = Promise.prototype.then;
-  function propagate<T>(
-    frame: Frame,
-    fn: ((value: T) => unknown) | null | undefined
-  ) {
-    if (typeof fn !== 'function') {
-      return fn;
-    }
-    return (value: T) => {
-      const previous = activeFrame;
-      activeFrame = frame;
-      try {
-        return fn(value);
-      } finally {
-        activeFrame = previous;
-      }
-    };
-  }
-  // eslint-disable-next-line no-extend-native
-  Promise.prototype.then = function (
-    this: Promise<unknown>,
-    onFulfilled,
-    onRejected
-  ) {
-    const frame = activeFrame;
-    if (frame == null) {
-      return original.call(this, onFulfilled, onRejected);
-    }
-    return original.call(
-      this,
-      propagate(frame, onFulfilled),
-      propagate(frame, onRejected)
-    );
-  } as typeof Promise.prototype.then;
-}
-
-function runWithFrame<T>(frame: Frame, fn: () => T): T {
-  installFramePropagation();
-  const previous = activeFrame;
-  activeFrame = frame;
-  try {
-    return fn();
-  } finally {
-    activeFrame = previous;
-  }
-}
 
 function supersededError(): XMoneyPaymentError {
   return new XMoneyPaymentError(
@@ -115,24 +53,39 @@ function supersededError(): XMoneyPaymentError {
   );
 }
 
+function orderCreationFailed(): XMoneyPaymentError {
+  return new XMoneyPaymentError(
+    'ORDER_CREATION_FAILED',
+    STABLE_MESSAGES.ORDER_CREATION_FAILED ?? 'Order creation failed'
+  );
+}
+
+function isUsableIntent(value: PaymentIntent | undefined): value is PaymentIntent {
+  return (
+    !!value &&
+    typeof value.orderPayload === 'string' &&
+    value.orderPayload.length > 0 &&
+    typeof value.orderChecksum === 'string' &&
+    value.orderChecksum.length > 0
+  );
+}
+
 /**
  * Shared order rebinding for the payment element and the wallet buttons.
  *
- * The native SDKs lock Pay before the server creates the next order. JS
- * promises cannot be cancelled, so [isUpdateCurrent] tells the callback when
- * a newer update has replaced it.
+ * The native SDKs lock Pay before the server creates the next order. The
+ * callback receives [UpdateOrderContext] so it can tell that a newer update
+ * replaced it, without patching `Promise`.
  */
 export function createOrderUpdater(options: {
   attached: () => boolean;
   commands: OrderCommands;
   onBound?: (intent: PaymentIntent) => void;
 }) {
-  const token = {};
   const pending = new Map<string, Waiter>();
   const lostLock = new Set<number>();
+  const aborts = new Map<number, AbortController>();
   let updateSeq = 0;
-  let pendingPayload: string | null = null;
-  let pendingChecksum: string | null = null;
 
   function ensureAttached() {
     if (!options.attached()) {
@@ -153,31 +106,32 @@ export function createOrderUpdater(options: {
     return seq === updateSeq && !lostLock.has(seq);
   }
 
+  function abortOlder(seq: number) {
+    for (const [older, controller] of aborts) {
+      if (older !== seq) {
+        controller.abort();
+        aborts.delete(older);
+      }
+    }
+  }
+
+  function abortAll() {
+    for (const controller of aborts.values()) {
+      controller.abort();
+    }
+    aborts.clear();
+  }
+
+  /** Rejects in-flight waiters so a dropped native id cannot hang the promise. */
+  function supersedePending() {
+    const error = supersededError();
+    const waiters = [...pending.values()];
+    pending.clear();
+    waiters.forEach((waiter) => waiter.reject(error));
+  }
+
   function remember(intent: PaymentIntent) {
-    if (
-      pendingPayload === intent.orderPayload &&
-      pendingChecksum === intent.orderChecksum
-    ) {
-      pendingPayload = null;
-      pendingChecksum = null;
-    }
     options.onBound?.(intent);
-  }
-
-  function holdPending(intent: PaymentIntent) {
-    pendingPayload = intent.orderPayload;
-    pendingChecksum = intent.orderChecksum;
-  }
-
-  function dropPending(intent: PaymentIntent, seq: number) {
-    if (
-      seq === updateSeq &&
-      pendingPayload === intent.orderPayload &&
-      pendingChecksum === intent.orderChecksum
-    ) {
-      pendingPayload = null;
-      pendingChecksum = null;
-    }
   }
 
   function rejectQuietly(requestId: string) {
@@ -190,22 +144,18 @@ export function createOrderUpdater(options: {
   }
 
   async function updateIntent(intent: PaymentIntent): Promise<void> {
+    ensureAttached();
     const seq = ++updateSeq;
-    holdPending(intent);
+    abortOlder(seq);
+    supersedePending();
     const requestId = `uo_${++nextRequest}`;
-    try {
-      ensureAttached();
-      const result = wait(requestId);
-      options.commands.updateOrder(
-        intent.orderPayload,
-        intent.orderChecksum,
-        requestId
-      );
-      await result;
-    } catch (error) {
-      dropPending(intent, seq);
-      throw error;
-    }
+    const result = wait(requestId);
+    options.commands.updateOrder(
+      intent.orderPayload,
+      intent.orderChecksum,
+      requestId
+    );
+    await result;
     if (seq === updateSeq) {
       remember(intent);
     }
@@ -214,22 +164,25 @@ export function createOrderUpdater(options: {
   /**
    * Locks Pay, creates the next order, binds it, and returns it.
    *
-   * Pay is a no-op from this call until the new order is bound, including
+   * Pay is a no-op from the native call until the new order is bound, including
    * while [createOrder] talks to the server. If [createOrder] throws, the
    * previous order stays payable and that error is rethrown. A newer update
    * supersedes this one (`SUPERSEDED_UPDATE_ORDER`).
    */
-  async function updateCreating(
-    createOrder: () => Promise<PaymentIntent>
-  ): Promise<PaymentIntent> {
+  async function updateCreating(createOrder: CreateOrder): Promise<PaymentIntent> {
     ensureAttached();
     const seq = ++updateSeq;
+    const abort = new AbortController();
+    aborts.set(seq, abort);
+    abortOlder(seq);
+    supersedePending();
     const requestId = `bw_${++nextRequest}`;
     const beginPromise = wait(requestId);
     const beginOutcome = beginPromise.then(
       () => null as XMoneyPaymentError | null,
       (error: unknown) => {
         lostLock.add(seq);
+        abort.abort();
         return XMoneyPaymentError.from(error);
       }
     );
@@ -238,7 +191,14 @@ export function createOrderUpdater(options: {
     let intent: PaymentIntent | undefined;
     let createError: unknown;
     try {
-      intent = await runWithFrame({ token, seq }, () => createOrder());
+      intent = await createOrder({
+        isCurrent: () => isSeqCurrent(seq),
+        signal: abort.signal,
+      });
+      if (!isUsableIntent(intent)) {
+        intent = undefined;
+        createError = orderCreationFailed();
+      }
     } catch (error) {
       createError = error;
     }
@@ -259,66 +219,40 @@ export function createOrderUpdater(options: {
         throw createError;
       }
       const bound = intent as PaymentIntent;
-      holdPending(bound);
-      try {
-        ensureAttached();
-        options.commands.resolveOrder(
-          bound.orderPayload,
-          bound.orderChecksum,
-          requestId
-        );
-        const beginError = await beginOutcome;
-        if (beginError) {
-          throw beginError;
-        }
-        if (!isSeqCurrent(seq)) {
-          throw supersededError();
-        }
-      } catch (error) {
-        if (
-          pendingPayload === bound.orderPayload &&
-          pendingChecksum === bound.orderChecksum
-        ) {
-          pendingPayload = null;
-          pendingChecksum = null;
-        }
-        throw error;
+      ensureAttached();
+      options.commands.resolveOrder(
+        bound.orderPayload,
+        bound.orderChecksum,
+        requestId
+      );
+      const beginError = await beginOutcome;
+      if (beginError) {
+        throw beginError;
+      }
+      if (!isSeqCurrent(seq)) {
+        throw supersededError();
       }
       remember(bound);
       return bound;
     } finally {
       lostLock.delete(seq);
+      aborts.delete(seq);
     }
   }
 
   return {
-    /**
-     * False once a newer update starts or the native lock for this call ends.
-     * True outside an `updateOrder(createOrder)` callback.
-     */
-    isUpdateCurrent(): boolean {
-      const frame = activeFrame;
-      if (frame == null || frame.token !== token) {
-        return true;
-      }
-      return isSeqCurrent(frame.seq);
-    },
-
-    /** Drops remembered intents and supersedes in-flight updates. */
+    /** Drops in-flight updates. A structural prepare uses this. */
     supersede() {
       updateSeq += 1;
-      pendingPayload = null;
-      pendingChecksum = null;
+      abortAll();
+      supersedePending();
     },
 
     detach() {
       updateSeq += 1;
-      pendingPayload = null;
-      pendingChecksum = null;
+      abortAll();
       lostLock.clear();
-      const waiters = [...pending.values()];
-      pending.clear();
-      waiters.forEach((waiter) => waiter.reject(supersededError()));
+      supersedePending();
     },
 
     settle(event: OrderUpdatedEvent) {
@@ -345,7 +279,7 @@ export function createOrderUpdater(options: {
      * intent it returns, and returns that intent.
      */
     updateOrder(
-      intentOrCreate: PaymentIntent | (() => Promise<PaymentIntent>)
+      intentOrCreate: PaymentIntent | CreateOrder
     ): Promise<void | PaymentIntent> {
       if (isCreateOrder(intentOrCreate)) {
         return updateCreating(intentOrCreate);

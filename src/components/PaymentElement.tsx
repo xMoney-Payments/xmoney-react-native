@@ -40,6 +40,7 @@ import type {
   PaymentConfig,
   PaymentIntent,
   PaymentResult,
+  UpdateOrderContext,
   UserInterfaceStyle,
   WalletAppearance,
 } from '../types';
@@ -56,17 +57,18 @@ export type PaymentElementProps = {
  * `confirm()` submits the selected method when `card.submitButton.visible` is false.
  * Await `updateOrder` (or `availability.isInteractionEnabled`) before `confirm()`.
  *
- * `updateOrder(createOrder)` locks Pay before `createOrder` runs. Check
- * `isUpdateCurrent` after a debounce so a superseded callback does not create
+ * `updateOrder(createOrder)` locks Pay when the native view receives the call.
+ * Check `isCurrent` after a debounce so a superseded callback does not create
  * an order.
  */
 export type PaymentElementRef = {
   confirm: () => void;
   updateOrder: {
     (intent: PaymentIntent): Promise<void>;
-    (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
+    (
+      createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>
+    ): Promise<PaymentIntent>;
   };
-  isUpdateCurrent: () => boolean;
   updateAppearance: (appearance: AppearanceConfig) => void;
   updateLocale: (locale: string) => void;
   updateStyle: (style: UserInterfaceStyle) => void;
@@ -92,6 +94,7 @@ export const PaymentElement = forwardRef<
   const [layoutReady, setLayoutReady] = useState(false);
   const liveKeys = useRef<NativePrepareLiveKeys>({
     intent: '',
+    propIntent: '',
     appearance: '',
     locale: '',
     style: '',
@@ -181,13 +184,16 @@ export const PaymentElement = forwardRef<
         Commands.confirm(node);
       }
     },
-    updateOrder: ((intentOrCreate: PaymentIntent | (() => Promise<PaymentIntent>)) => {
+    updateOrder: ((
+      intentOrCreate:
+        | PaymentIntent
+        | ((ctx: UpdateOrderContext) => Promise<PaymentIntent>)
+    ) => {
       if (typeof intentOrCreate !== 'function') {
         liveKeys.current.intent = intentSnapshot(intentOrCreate);
       }
       return updater.updateOrder(intentOrCreate);
     }) as PaymentElementRef['updateOrder'],
-    isUpdateCurrent: () => updater.isUpdateCurrent(),
     updateAppearance: (appearance) => {
       liveKeys.current.appearance = appearanceSnapshot(
         configuration,
@@ -247,9 +253,13 @@ export const PaymentElement = forwardRef<
           isProcessing: event.nativeEvent.isProcessing,
         })
       }
-      onResult={(event: NativeSyntheticEvent<{ resultJson: string }>) =>
-        onResult?.(parsePaymentResult(event.nativeEvent.resultJson))
-      }
+      onResult={(event: NativeSyntheticEvent<{ resultJson: string }>) => {
+        const result = parsePaymentResult(event.nativeEvent.resultJson);
+        if (result.status === 'failed') {
+          markNativePrepareAcked(liveKeys);
+        }
+        onResult?.(result);
+      }}
       onOrderUpdated={(
         event: NativeSyntheticEvent<{
           requestId: string;
@@ -274,7 +284,6 @@ export const PaymentElement = forwardRef<
           isInteractionEnabled: boolean;
         }>
       ) => {
-        markNativePrepareAcked(liveKeys);
         onEvent?.(toEmbeddedAvailabilityEvent(event.nativeEvent));
       }}
       onHeightChange={(event: NativeSyntheticEvent<{ height: number }>) => {

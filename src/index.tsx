@@ -66,6 +66,7 @@ export type {
   Transaction,
   TransactionCustomer,
   UpdateFailedEvent,
+  UpdateOrderContext,
   UserInterfaceStyle,
   ValidationMode,
   ApplePayAppearance,

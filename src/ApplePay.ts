@@ -21,6 +21,7 @@ import type {
   PaymentConfig,
   PaymentIntent,
   PaymentResult,
+  UpdateOrderContext,
   WalletState,
 } from './types';
 
@@ -60,8 +61,8 @@ function unsupported(): PaymentResult {
  * Pre-auth PassKit dismiss resolves `{ status: 'canceled' }` and does not consume.
  *
  * `updateOrder(intent)` may run before `present` (native stores the next payable
- * intent). `updateOrder(createOrder)` locks Pay before the callback returns.
- * `isUpdateCurrent()` is false inside a superseded callback.
+ * intent). `updateOrder(createOrder)` locks Pay when the native call runs.
+ * The callback receives `{ isCurrent, signal }`.
  *
  * `getState()` reads PassKit `canMakePayments()` for both `isAvailable` and
  * `isReady` (no intent). That is not a site-vs-device split.
@@ -108,8 +109,8 @@ export const ApplePay = {
 
   /**
    * `updateOrder(intent)` binds a signed intent. Pay stays enabled until the
-   * bind starts. `updateOrder(createOrder)` locks Pay first and returns the
-   * bound intent. May be called before `present`.
+   * bind starts. `updateOrder(createOrder)` locks Pay when native receives the
+   * call and returns the bound intent. May be called before `present`.
    */
   updateOrder: (async (intentOrCreate) => {
     getModule();
@@ -122,12 +123,9 @@ export const ApplePay = {
     return orderUpdater().updateOrder(intentOrCreate);
   }) as {
     (intent: PaymentIntent): Promise<void>;
-    (createOrder: () => Promise<PaymentIntent>): Promise<PaymentIntent>;
-  },
-
-  /** False once a newer `updateOrder` has replaced the callback that is running. */
-  isUpdateCurrent(): boolean {
-    return orderUpdater().isUpdateCurrent();
+    (
+      createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>
+    ): Promise<PaymentIntent>;
   },
 
   dismiss(): void {

@@ -255,19 +255,19 @@ internal object XMoneyPaymentSheetBridge {
         promise: Promise,
         holder: GooglePayHolder,
     ) {
-        if (holder.orders.isFinished(requestId)) {
-            promise.reject(
-                "SUPERSEDED_UPDATE_ORDER",
-                "Superseded by a newer updateOrder call",
-            )
-            return
-        }
         val activity = reactContext.currentActivity as? FragmentActivity
         if (activity == null) {
             promise.reject("NO_PRESENTER", "Unable to present from the current screen.")
             return
         }
         UiThreadUtil.runOnUiThread {
+            if (holder.orders.isFinished(requestId)) {
+                promise.reject(
+                    "SUPERSEDED_UPDATE_ORDER",
+                    "Superseded by a newer updateOrder call",
+                )
+                return@runOnUiThread
+            }
             val deferred = holder.orders.gate(requestId)
             val googlePay = holder.googlePay
             if (deferred == null || googlePay == null) {

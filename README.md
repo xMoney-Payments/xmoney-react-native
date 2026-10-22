@@ -189,19 +189,20 @@ After `complete` / `failed` / post-submit `canceled`, hide the element (or pass 
 await elementRef.current?.updateOrder(nextIntent);
 ```
 
-When the shopper changes the cart, pass a callback to `updateOrder`, the same overload as the native SDKs. Pay locks immediately and stays locked until the order returned by the callback is bound, including during a debounce. If the callback throws, the previous order stays payable.
+When the shopper changes the cart, pass a callback to `updateOrder`, the same overload as the native SDKs. Pay locks when the native view receives the call, about one frame after `updateOrder`, and stays locked until the order returned by the callback is bound, including during a debounce. A tap in that window can still charge the previous order. If the callback throws, the previous order stays payable.
 
 ```tsx
-const next = await elementRef.current?.updateOrder(async () => {
+const next = await elementRef.current?.updateOrder(async ({ isCurrent, signal }) => {
   await new Promise((resolve) => setTimeout(resolve, 300));
-  if (!elementRef.current?.isUpdateCurrent()) {
+  if (!isCurrent()) {
     throw new Error('superseded');
   }
-  return createOrderOnYourServer(cartTotal);
+  return createOrderOnYourServer(cartTotal, { signal });
 });
+setIntent(next);
 ```
 
-A newer call replaces an in-flight one and rejects with `SUPERSEDED_UPDATE_ORDER`. `isUpdateCurrent()` follows `await`, so the `new Promise(setTimeout)` check above stays tied to that callback. A raw `setTimeout` callback is outside the update and reports current. Check it after waiting so the older callback does not call your server. Do not change the `intent` prop until this call resolves; a prop change during the callback is applied after the lock.
+A newer call replaces an in-flight one and rejects with `SUPERSEDED_UPDATE_ORDER`. The callback receives `isCurrent` and an `AbortSignal` that aborts when a newer update starts. Check `isCurrent()` after waiting so the older callback does not call your server, and pass `signal` through to that request. Changing the `intent` prop to a different order supersedes this callback. After the call resolves, set the `intent` prop to the returned order so a later appearance or locale change does not rebind the previous one. On Android, a surface detached from the window rejects an in-flight `updateOrder` with `SUPERSEDED_UPDATE_ORDER`, for example an inactive `react-native-screens` screen. Call `updateOrder` again when the screen is shown.
 
 `ApplePay`, `GooglePay`, `ApplePayButton`, and `GooglePayButton` have the same two `updateOrder` overloads. The wallet locks while your server creates the order, so a fast tap cannot charge the previous one.
 
@@ -271,7 +272,7 @@ ApplePay.dismiss(); // closes PassKit before authorize; no-op during token submi
 />
 ```
 
-`ApplePay.updateOrder` may run **before** `present` to bind the next payable intent. After `getState` or wallet-button `onEvent` `availability`, gate your own chrome with `isAvailable`, `isReady`, `isOrderConsumed`, and `isInteractionEnabled`.
+`ApplePay.updateOrder` may run **before** `present` to bind the next payable intent. Imperative Apple Pay does not emit `updateFailed` (native `ApplePayEvent` has no such case). A later bind failure rejects `updateOrder`. The Apple Pay button does emit `updateFailed`. After `getState` or wallet-button `onEvent` `availability`, gate your own chrome with `isAvailable`, `isReady`, `isOrderConsumed`, and `isInteractionEnabled`.
 
 Pre-auth dismiss delivers `{ status: 'canceled' }` and does **not** consume. Present or tap again with the same intent.
 
@@ -309,7 +310,7 @@ if (state.isAvailable && state.isReady) {
 />
 ```
 
-`GooglePay.updateOrder` rebinds the open host — call **after** `present`, while the overlay is still open. Throws if no host is open. A second `present()` while one is in flight returns `{ status: 'canceled' }` — `dismiss()` then `present()` to replace.
+`GooglePay.updateOrder` rebinds the open host — call **after** `present`, while the overlay is still open. `updateOrder(createOrder)` throws `GOOGLE_PAY` (`Google Pay is not presented`) before the callback runs when the overlay is closed. A later bind failure emits `updateFailed` on the `present` listener. A second `present()` while one is in flight returns `{ status: 'canceled' }` — `dismiss()` then `present()` to replace.
 
 Pre-auth dismiss delivers `{ status: 'canceled' }` and does **not** consume. Present or tap again with the same intent.
 
@@ -392,11 +393,11 @@ Use only these merchant-facing exports from `@xmoney/react-native`:
 
 | Surface         | Types                                                                 |
 | --------------- | --------------------------------------------------------------------- |
-| Config / models | `PaymentConfig` and nested options, `PaymentIntent`, `PaymentResult`, `PaymentError`, `Transaction`, `CardHolderVerificationResult` |
+| Config / models | `PaymentConfig` and nested options, `PaymentIntent`, `PaymentResult`, `PaymentError`, `Transaction`, `CardHolderVerificationResult`, `UpdateFailedEvent`, `UpdateOrderContext` |
 | Payment Sheet   | `PaymentSheet`, `usePaymentSheet`, `PaymentSheetEvent`                |
-| Payment Element | `PaymentElement`, `PaymentElementRef` (`confirm`, `updateOrder`, `isUpdateCurrent`, `updateAppearance`, `updateLocale`, `updateStyle`, `updateWalletAppearance`), `EmbeddedEvent` |
-| Apple Pay       | `ApplePay` (`init`, `present`, `updateOrder`, `isUpdateCurrent`, `dismiss`, `getState`), `ApplePayButton`, `ApplePayButtonRef` (`updateOrder`, `isUpdateCurrent`), `WalletPayEvent` |
-| Google Pay      | `GooglePay` (`init`, `present`, `updateOrder`, `isUpdateCurrent`, `dismiss`, `getState`), `GooglePayButton`, `GooglePayButtonRef` (`updateOrder`, `isUpdateCurrent`), `WalletPayEvent` |
+| Payment Element | `PaymentElement`, `PaymentElementRef` (`confirm`, `updateOrder`, `updateAppearance`, `updateLocale`, `updateStyle`, `updateWalletAppearance`), `EmbeddedEvent` |
+| Apple Pay       | `ApplePay` (`init`, `present`, `updateOrder`, `dismiss`, `getState`), `ApplePayButton`, `ApplePayButtonRef` (`updateOrder`), `WalletPayEvent` |
+| Google Pay      | `GooglePay` (`init`, `present`, `updateOrder`, `dismiss`, `getState`), `GooglePayButton`, `GooglePayButtonRef` (`updateOrder`), `WalletPayEvent` |
 | Errors          | `XMoneyPaymentError` (`NOT_LINKED` when the native module is missing) |
 
 ## PCI scope

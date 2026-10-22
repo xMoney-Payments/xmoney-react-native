@@ -70,13 +70,14 @@ export function UpdateOrderSample({onBack}: {onBack: () => void}) {
       try {
         const element = elementRef.current;
         if (!initial && element && intentRef.current) {
-          const next = await element.updateOrder(async () => {
+          const next = await element.updateOrder(async ({ isCurrent, signal }) => {
             await new Promise((resolve) => setTimeout(resolve, 300));
-            if (!element.isUpdateCurrent()) {
+            if (!isCurrent()) {
               throw new Error('superseded');
             }
             return DemoCheckoutBackend.createPaymentIntent({
               amountMinor: amount,
+              signal,
             });
           });
           if (cancelled || request !== requestRef.current) {
@@ -116,7 +117,7 @@ export function UpdateOrderSample({onBack}: {onBack: () => void}) {
   return (
     <SampleScaffold
       title="Update order"
-      subtitle="Changing the amount locks Pay immediately, then binds the new order."
+      subtitle="Changing the amount locks Pay, then binds the new order."
       onBack={onBack}
       showTestCards>
       <ScrollView contentContainerStyle={{gap: 16, paddingBottom: 32}}>

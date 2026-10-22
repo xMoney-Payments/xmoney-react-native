@@ -49,6 +49,7 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
     private val orders = PendingOrders()
     private val updates = OrderUpdateLaunch()
     private var boundConfiguration: Map<String, Any?>? = null
+    private var layoutScheduled = false
 
     var configuration: Map<String, Any?>? = null
     var appearance: Map<String, Any?>? = null
@@ -69,6 +70,22 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
         composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         composeView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> reportHeight() }
         addView(composeView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    }
+
+    // React Native parents drop requestLayout, so Compose content and the
+    // Google Pay view inside it would stay at 0 height.
+    override fun requestLayout() {
+        super.requestLayout()
+        if (layoutScheduled) return
+        layoutScheduled = true
+        post {
+            layoutScheduled = false
+            composeView.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            )
+            composeView.layout(0, 0, composeView.measuredWidth, composeView.measuredHeight)
+        }
     }
 
     fun setConfigurationMap(value: ReadableMap?) {

@@ -547,14 +547,15 @@ function EmbeddedCheckout({
       try {
         const element = elementRef.current;
         if (intentRef.current && element) {
-          const next = await element.updateOrder(async () => {
+          const next = await element.updateOrder(async ({ isCurrent, signal }) => {
             await new Promise((resolve) => setTimeout(resolve, 300));
-            if (!element.isUpdateCurrent()) {
+            if (!isCurrent()) {
               throw new Error('superseded');
             }
             return DemoCheckoutBackend.createPaymentIntent({
               amountMinor: amount,
               description: orderDescription,
+              signal,
             });
           });
           if (cancelled || request !== requestRef.current) {
