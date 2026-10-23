@@ -80,6 +80,9 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
         layoutScheduled = true
         post {
             layoutScheduled = false
+            // The screen can close before this runs. Measuring a detached
+            // ComposeView throws "Cannot locate windowRecomposer".
+            if (!isAttachedToWindow || !composeView.isAttachedToWindow) return@post
             composeView.measure(
                 MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),

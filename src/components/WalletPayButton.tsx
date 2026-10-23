@@ -99,6 +99,7 @@ export const WalletPayButton = forwardRef<
     structural: '',
     prepared: false,
     acked: false,
+    updateStarted: false,
   });
   const updater = useMemo(
     () =>
@@ -165,6 +166,8 @@ export const WalletPayButton = forwardRef<
         updater.supersede();
         Commands.prepare(node, orderPayload, orderChecksum);
       },
+      // The Android retry must not supersede an in-flight update.
+      retryPrepare: Commands.prepare,
       updateOrder: Commands.updateOrder,
       updateAppearance: Commands.updateAppearance,
     }),
@@ -191,6 +194,7 @@ export const WalletPayButton = forwardRef<
         | PaymentIntent
         | ((ctx: UpdateOrderContext) => Promise<PaymentIntent>)
     ) => {
+      liveKeys.current.updateStarted = true;
       if (typeof intentOrCreate !== 'function') {
         liveKeys.current.intent = intentSnapshot(intentOrCreate);
       }

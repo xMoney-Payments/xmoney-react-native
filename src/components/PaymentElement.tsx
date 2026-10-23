@@ -102,6 +102,7 @@ export const PaymentElement = forwardRef<
     structural: '',
     prepared: false,
     acked: false,
+    updateStarted: false,
   });
   const updater = useMemo(
     () =>
@@ -160,6 +161,8 @@ export const PaymentElement = forwardRef<
         updater.supersede();
         Commands.prepare(node, orderPayload, orderChecksum);
       },
+      // The Android retry must not supersede an in-flight update.
+      retryPrepare: Commands.prepare,
       updateOrder: Commands.updateOrder,
       updateAppearance: Commands.updateAppearance,
       updateLocale: Commands.updateLocale,
@@ -189,6 +192,7 @@ export const PaymentElement = forwardRef<
         | PaymentIntent
         | ((ctx: UpdateOrderContext) => Promise<PaymentIntent>)
     ) => {
+      liveKeys.current.updateStarted = true;
       if (typeof intentOrCreate !== 'function') {
         liveKeys.current.intent = intentSnapshot(intentOrCreate);
       }

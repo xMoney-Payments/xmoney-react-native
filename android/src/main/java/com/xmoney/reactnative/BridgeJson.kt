@@ -5,6 +5,8 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.UIManagerHelper
+import com.facebook.react.uimanager.common.UIManagerType
+import com.facebook.react.uimanager.common.ViewUtil
 import com.facebook.react.uimanager.events.Event
 import com.facebook.react.uimanager.events.RCTEventEmitter
 import org.json.JSONArray
@@ -54,12 +56,21 @@ internal object BridgeJson {
     }
 }
 
+/**
+ * True for a view created by the Paper renderer. React Native gives Paper
+ * views odd tags and Fabric views even tags, in every architecture mode.
+ */
+internal fun usesLegacyEventPath(viewTag: Int): Boolean =
+    ViewUtil.getUIManagerType(viewTag) == UIManagerType.DEFAULT
+
 internal fun View.emitNativeEvent(name: String, payload: WritableMap?) {
     val reactContext = context as? ReactContext ?: return
     if (id == View.NO_ID) return
-    // The legacy bridge delivers view events directly. Its frame dispatcher
-    // pauses while a payment sheet is open, so `ready` never reaches JS.
-    if (!reactContext.isBridgeless) {
+    // A Paper view delivers events directly. The Paper frame dispatcher pauses
+    // while a payment sheet is open, so `ready` would never reach JS. The choice
+    // follows the view's renderer, not bridgeless mode: Fabric can run with the
+    // bridge, and a Fabric view must go through the event dispatcher.
+    if (usesLegacyEventPath(id)) {
         reactContext
             .getJSModule(RCTEventEmitter::class.java)
             .receiveEvent(id, name, payload)
