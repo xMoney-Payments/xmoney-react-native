@@ -11,13 +11,15 @@ React Native SDK for [xMoney](https://xmoney.com) checkout. Three surfaces, one 
 
 ## Requirements
 
-- React Native New Architecture (`react-native` >= 0.76)
+- React Native >= 0.76, with the New Architecture or legacy architecture
 - iOS 15.0+
 - Android `minSdk` 23
 
+Legacy-architecture support applies to React Native 0.76–0.81 and will be removed in a future major release. React Native 0.82 and newer always use the New Architecture.
+
 ## Installation
 
-Latest release: **`1.0.0`**
+Latest release: **`1.1.0`**
 
 ```bash
 npm install @xmoney/react-native
@@ -79,7 +81,11 @@ type PaymentResult =
 
 `failed` messages are SDK-authored. Do not display raw server bodies.
 
-Interim events (`ready`, `processing`) are optional and do not replace the result callback. Use `ready` to hide merchant loading until the surface is bound. `processing` is an in-flight charge only — `updateOrder` does not emit it.
+Interim events (`ready`, `processing`, `updateFailed`) are optional and do not replace the result callback. `ready` fires once per mounted surface, after the form has drawn or, for a wallet button, after the mount order is bound and the button has drawn. A failed first load does not emit `ready` — end merchant loading on a `failed` result as well. `processing` is an in-flight charge only. `updateOrder` does not emit `ready` or `processing`.
+
+`updateFailed` means a later order bind failed after one was already bound. Pay stays locked on the previous order. Show the error and call `updateOrder` again. `onResult` is not called for that failure.
+
+`updateOrder` during a charge throws `PAYMENT_IN_PROGRESS` (`Payment in progress`) when the intent differs from the one being charged. The same intent is a no-op. A newer `updateOrder` rejects the previous call with `SUPERSEDED_UPDATE_ORDER`.
 
 ## Order lifecycle
 
@@ -177,11 +183,28 @@ After `complete` / `failed` / post-submit `canceled`, hide the element (or pass 
 
 ### Update the order
 
-`ref.updateOrder` (or changing the `intent` prop) rebinds a new signed `PaymentIntent` on the mounted Element. Pay, `confirm()`, and wallet buttons are disabled until bind finishes (`isInteractionEnabled` is false). A newer `updateOrder` cancels the in-flight one. The Pay button keeps its current title; it does not show “Processing...”.
+`ref.updateOrder` (or changing the `intent` prop) rebinds a signed `PaymentIntent` you already have. Pay stays enabled while your server creates that order. Pay, `confirm()`, and wallet buttons are disabled once the bind starts (`isInteractionEnabled` is false) until it finishes. A newer `updateOrder` cancels the in-flight one. The Pay button keeps its current title; it does not show “Processing...”. A failed rebind emits `onEvent` `{ type: 'updateFailed', error }` and leaves Pay locked until a later bind succeeds.
 
 ```tsx
 await elementRef.current?.updateOrder(nextIntent);
 ```
+
+When the shopper changes the cart, pass a callback to `updateOrder`, the same overload as the native SDKs. Pay locks when the native view receives the call, about one frame after `updateOrder`, and stays locked until the order returned by the callback is bound, including during a debounce. A tap in that window can still charge the previous order. If the callback throws, the previous order stays payable.
+
+```tsx
+const next = await elementRef.current?.updateOrder(async ({ isCurrent, signal }) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  if (!isCurrent()) {
+    throw new Error('superseded');
+  }
+  return createOrderOnYourServer(cartTotal, { signal });
+});
+setIntent(next);
+```
+
+A newer call replaces an in-flight one and rejects with `SUPERSEDED_UPDATE_ORDER`. The callback receives `isCurrent` and an `AbortSignal` that aborts when a newer update starts. Check `isCurrent()` after waiting so the older callback does not call your server, and pass `signal` through to that request. Changing the `intent` prop to a different order supersedes this callback. After the call resolves, set the `intent` prop to the returned order so a later appearance or locale change does not rebind the previous one. On Android, a surface detached from the window rejects an in-flight `updateOrder` with `SUPERSEDED_UPDATE_ORDER`, for example an inactive `react-native-screens` screen. Call `updateOrder` again when the screen is shown.
+
+`ApplePay`, `GooglePay`, `ApplePayButton`, and `GooglePayButton` have the same two `updateOrder` overloads. The wallet locks while your server creates the order, so a fast tap cannot charge the previous one.
 
 Keep the surface mounted; do not unmount the form for a loader. Gate a merchant-owned Pay button with `isInteractionEnabled`.
 
@@ -249,7 +272,7 @@ ApplePay.dismiss(); // closes PassKit before authorize; no-op during token submi
 />
 ```
 
-`ApplePay.updateOrder` may run **before** `present` to bind the next payable intent. After `getState` or wallet-button `onEvent` `availability`, gate your own chrome with `isAvailable`, `isReady`, `isOrderConsumed`, and `isInteractionEnabled`.
+`ApplePay.updateOrder` may run **before** `present` to bind the next payable intent. Imperative Apple Pay does not emit `updateFailed` (native `ApplePayEvent` has no such case). A later bind failure rejects `updateOrder`. The Apple Pay button does emit `updateFailed`. After `getState` or wallet-button `onEvent` `availability`, gate your own chrome with `isAvailable`, `isReady`, `isOrderConsumed`, and `isInteractionEnabled`.
 
 Pre-auth dismiss delivers `{ status: 'canceled' }` and does **not** consume. Present or tap again with the same intent.
 
@@ -287,7 +310,7 @@ if (state.isAvailable && state.isReady) {
 />
 ```
 
-`GooglePay.updateOrder` rebinds the open host — call **after** `present`, while the overlay is still open. Throws if no host is open. A second `present()` while one is in flight returns `{ status: 'canceled' }` — `dismiss()` then `present()` to replace.
+`GooglePay.updateOrder` rebinds the open host — call **after** `present`, while the overlay is still open. `updateOrder(createOrder)` throws `GOOGLE_PAY` (`Google Pay is not presented`) before the callback runs when the overlay is closed. A later bind failure emits `updateFailed` on the `present` listener. A second `present()` while one is in flight returns `{ status: 'canceled' }` — `dismiss()` then `present()` to replace.
 
 Pre-auth dismiss delivers `{ status: 'canceled' }` and does **not** consume. Present or tap again with the same intent.
 
@@ -370,11 +393,11 @@ Use only these merchant-facing exports from `@xmoney/react-native`:
 
 | Surface         | Types                                                                 |
 | --------------- | --------------------------------------------------------------------- |
-| Config / models | `PaymentConfig` and nested options, `PaymentIntent`, `PaymentResult`, `PaymentError`, `Transaction`, `CardHolderVerificationResult` |
+| Config / models | `PaymentConfig` and nested options, `PaymentIntent`, `PaymentResult`, `PaymentError`, `Transaction`, `CardHolderVerificationResult`, `UpdateFailedEvent`, `UpdateOrderContext` |
 | Payment Sheet   | `PaymentSheet`, `usePaymentSheet`, `PaymentSheetEvent`                |
 | Payment Element | `PaymentElement`, `PaymentElementRef` (`confirm`, `updateOrder`, `updateAppearance`, `updateLocale`, `updateStyle`, `updateWalletAppearance`), `EmbeddedEvent` |
-| Apple Pay       | `ApplePay` (`init`, `present`, `updateOrder`, `dismiss`, `getState`), `ApplePayButton`, `ApplePayButtonRef`, `WalletPayEvent` |
-| Google Pay      | `GooglePay` (`init`, `present`, `updateOrder`, `dismiss`, `getState`), `GooglePayButton`, `GooglePayButtonRef`, `WalletPayEvent` |
+| Apple Pay       | `ApplePay` (`init`, `present`, `updateOrder`, `dismiss`, `getState`), `ApplePayButton`, `ApplePayButtonRef` (`updateOrder`), `WalletPayEvent` |
+| Google Pay      | `GooglePay` (`init`, `present`, `updateOrder`, `dismiss`, `getState`), `GooglePayButton`, `GooglePayButtonRef` (`updateOrder`), `WalletPayEvent` |
 | Errors          | `XMoneyPaymentError` (`NOT_LINKED` when the native module is missing) |
 
 ## PCI scope

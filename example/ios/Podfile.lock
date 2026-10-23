@@ -1238,6 +1238,72 @@ PODS:
     - React-jsiexecutor
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
+  - react-native-safe-area-context (5.10.1):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - react-native-safe-area-context/common (= 5.10.1)
+    - react-native-safe-area-context/fabric (= 5.10.1)
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
+  - react-native-safe-area-context/common (5.10.1):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
+  - react-native-safe-area-context/fabric (5.10.1):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - react-native-safe-area-context/common
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - React-NativeModulesApple (0.78.0):
     - glog
     - hermes-engine
@@ -1569,7 +1635,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - Yoga
   - SocketRocket (0.7.1)
-  - xmoney-react-native (0.0.1):
+  - xmoney-react-native (1.1.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1589,16 +1655,16 @@ PODS:
     - ReactCodegen
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
-    - XMoneyPaymentSheet (= 0.0.3)
+    - XMoneyPaymentSheet (= 1.1.0)
     - Yoga
-  - XMoneyPaymentSheet (0.0.3):
-    - XMoneyPaymentSheet/PaymentSheet (= 0.0.3)
-  - XMoneyPaymentSheet/ApplePay (0.0.3):
+  - XMoneyPaymentSheet (1.1.0):
+    - XMoneyPaymentSheet/PaymentSheet (= 1.1.0)
+  - XMoneyPaymentSheet/ApplePay (1.1.0):
     - XMoneyPaymentSheet/Core
-  - XMoneyPaymentSheet/Core (0.0.3)
-  - XMoneyPaymentSheet/PaymentElement (0.0.3):
+  - XMoneyPaymentSheet/Core (1.1.0)
+  - XMoneyPaymentSheet/PaymentElement (1.1.0):
     - XMoneyPaymentSheet/Core
-  - XMoneyPaymentSheet/PaymentSheet (0.0.3):
+  - XMoneyPaymentSheet/PaymentSheet (1.1.0):
     - XMoneyPaymentSheet/ApplePay
     - XMoneyPaymentSheet/Core
     - XMoneyPaymentSheet/PaymentElement
@@ -1644,6 +1710,7 @@ DEPENDENCIES:
   - React-logger (from `../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
+  - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
   - React-perflogger (from `../node_modules/react-native/ReactCommon/reactperflogger`)
   - React-performancetimeline (from `../node_modules/react-native/ReactCommon/react/performance/timeline`)
@@ -1757,6 +1824,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   React-microtasksnativemodule:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
+  react-native-safe-area-context:
+    :path: "../node_modules/react-native-safe-area-context"
   React-NativeModulesApple:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-perflogger:
@@ -1858,6 +1927,7 @@ SPEC CHECKSUMS:
   React-logger: 018826bfd51b9f18e87f67db1590bc510ad20664
   React-Mapbuffer: 3c11cee7737609275c7b66bd0b1de475f094cedf
   React-microtasksnativemodule: 843f352b32aacbe13a9c750190d34df44c3e6c2c
+  react-native-safe-area-context: 060557bc11bc3b1dcdb5890a4a575a226b22e034
   React-NativeModulesApple: 88433b6946778bea9c153e27b671de15411bf225
   React-perflogger: 9e8d3c0dc0194eb932162812a168aa5dc662f418
   React-performancetimeline: 5a2d6efef52bdcefac079c7baa30934978acd023
@@ -1888,10 +1958,10 @@ SPEC CHECKSUMS:
   ReactCommon: 0c097b53f03d6bf166edbcd0915da32f3015dd90
   RNSVG: 8126581b369adf6a0004b6a6cab1a55e3002d5b0
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  xmoney-react-native: 896871f9af7e5bec7058cdfb22279782b29c63c3
-  XMoneyPaymentSheet: d4af1c3de49b48a1555cc05aefcaefd10baaf18f
+  xmoney-react-native: 23db5dd1c7428cc1e218a878ae6b3ea01c57e1a5
+  XMoneyPaymentSheet: b62e52fa088c38991822ba99d73ecf498b58b3ef
   Yoga: afd04ff05ebe0121a00c468a8a3c8080221cb14c
 
 PODFILE CHECKSUM: bb6b9dc0e5bd8ea7d78728bddd2523721454f28c
 
-COCOAPODS: 1.17.0
+COCOAPODS: 1.15.2

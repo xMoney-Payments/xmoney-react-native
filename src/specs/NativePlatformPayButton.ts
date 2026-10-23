@@ -33,6 +33,11 @@ export interface NativeOrderUpdatedEvent {
   error?: string;
 }
 
+export interface NativeUpdateFailedEvent {
+  code: string;
+  message: string;
+}
+
 export interface NativeEmptyEvent {}
 
 export interface NativePlatformPayButtonProps extends ViewProps {
@@ -47,6 +52,7 @@ export interface NativePlatformPayButtonProps extends ViewProps {
   onHeightChange?: DirectEventHandler<Readonly<NativePlatformPayHeightEvent>>;
   onAvailability?: DirectEventHandler<Readonly<NativeAvailabilityEvent>>;
   onOrderUpdated?: DirectEventHandler<Readonly<NativeOrderUpdatedEvent>>;
+  onUpdateFailed?: DirectEventHandler<Readonly<NativeUpdateFailedEvent>>;
 }
 
 interface NativeCommands {
@@ -61,6 +67,20 @@ interface NativeCommands {
     orderChecksum: string,
     requestId: string
   ) => void;
+  beginUpdateOrder: (
+    viewRef: React.ElementRef<HostComponent<NativePlatformPayButtonProps>>,
+    requestId: string
+  ) => void;
+  resolveOrder: (
+    viewRef: React.ElementRef<HostComponent<NativePlatformPayButtonProps>>,
+    orderPayload: string,
+    orderChecksum: string,
+    requestId: string
+  ) => void;
+  rejectOrder: (
+    viewRef: React.ElementRef<HostComponent<NativePlatformPayButtonProps>>,
+    requestId: string
+  ) => void;
   updateAppearance: (
     viewRef: React.ElementRef<HostComponent<NativePlatformPayButtonProps>>,
     appearanceJson: string
@@ -68,7 +88,14 @@ interface NativeCommands {
 }
 
 export const Commands = codegenNativeCommands<NativeCommands>({
-  supportedCommands: ['prepare', 'updateOrder', 'updateAppearance'],
+  supportedCommands: [
+    'prepare',
+    'updateOrder',
+    'beginUpdateOrder',
+    'resolveOrder',
+    'rejectOrder',
+    'updateAppearance',
+  ],
 });
 
 export default codegenNativeComponent<NativePlatformPayButtonProps>(

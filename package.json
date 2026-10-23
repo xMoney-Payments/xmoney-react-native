@@ -1,6 +1,6 @@
 {
   "name": "@xmoney/react-native",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "xMoney React Native SDK: thin wrapper over xmoney-ios and xmoney-android PaymentSheet, Payment Element, and wallet buttons.",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",

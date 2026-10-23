@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -15,12 +16,13 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { toAvailabilityEvent } from '../availability';
+import { sanitizePaymentError } from '../errors';
 import NativePlatformPayButton, {
   Commands,
 } from '../specs/NativePlatformPayButton';
 import { parsePaymentResult } from '../parseResult';
 import { platformPayMethods } from '../platformPayConfig';
-import { createOrderUpdateQueue } from './orderUpdates';
+import { createOrderUpdater } from './orderUpdater';
 import {
   appearanceSnapshot,
   intentSnapshot,
@@ -38,6 +40,7 @@ import type {
   PaymentConfig,
   PaymentIntent,
   PaymentResult,
+  UpdateOrderContext,
   WalletPayEvent,
 } from '../types';
 
@@ -52,7 +55,12 @@ export type WalletPayButtonProps = {
 };
 
 export type WalletPayButtonRef = {
-  updateOrder: (intent: PaymentIntent) => Promise<void>;
+  updateOrder: {
+    (intent: PaymentIntent): Promise<void>;
+    (
+      createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>
+    ): Promise<PaymentIntent>;
+  };
   updateAppearance: (
     appearance: ApplePayAppearance | GooglePayAppearance
   ) => void;
@@ -83,6 +91,7 @@ export const WalletPayButton = forwardRef<
   const [layoutReady, setLayoutReady] = useState(false);
   const liveKeys = useRef<NativePrepareLiveKeys>({
     intent: '',
+    propIntent: '',
     appearance: '',
     locale: '',
     style: '',
@@ -90,8 +99,50 @@ export const WalletPayButton = forwardRef<
     structural: '',
     prepared: false,
     acked: false,
+    updateStarted: false,
   });
-  const orderQueue = useMemo(() => createOrderUpdateQueue(), []);
+  const updater = useMemo(
+    () =>
+      createOrderUpdater({
+        attached: () => viewRef.current != null,
+        commands: {
+          updateOrder: (orderPayload, orderChecksum, requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.updateOrder(node, orderPayload, orderChecksum, requestId);
+            }
+          },
+          beginUpdateOrder: (requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.beginUpdateOrder(node, requestId);
+            }
+          },
+          resolveOrder: (orderPayload, orderChecksum, requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.resolveOrder(
+                node,
+                orderPayload,
+                orderChecksum,
+                requestId
+              );
+            }
+          },
+          rejectOrder: (requestId) => {
+            const node = viewRef.current;
+            if (node) {
+              Commands.rejectOrder(node, requestId);
+            }
+          },
+        },
+        onBound: (bound) => {
+          liveKeys.current.intent = intentSnapshot(bound);
+        },
+      }),
+    []
+  );
+  useEffect(() => () => updater.detach(), [updater]);
   const paymentMethods = useMemo(
     () => configuration.paymentMethods ?? platformPayMethods(appearance),
     [appearance, configuration.paymentMethods]
@@ -107,11 +158,20 @@ export const WalletPayButton = forwardRef<
   );
   const commands = useMemo(
     () => ({
-      prepare: Commands.prepare,
+      prepare: (
+        node: ElementRef<typeof NativePlatformPayButton>,
+        orderPayload: string,
+        orderChecksum: string
+      ) => {
+        updater.supersede();
+        Commands.prepare(node, orderPayload, orderChecksum);
+      },
+      // The Android retry must not supersede an in-flight update.
+      retryPrepare: Commands.prepare,
       updateOrder: Commands.updateOrder,
       updateAppearance: Commands.updateAppearance,
     }),
-    []
+    [updater]
   );
   useNativePrepare(
     viewRef,
@@ -129,21 +189,17 @@ export const WalletPayButton = forwardRef<
   );
 
   useImperativeHandle(ref, () => ({
-    updateOrder: (nextIntent) => {
-      liveKeys.current.intent = intentSnapshot(nextIntent);
-      const node = viewRef.current;
-      if (!node) {
-        return Promise.reject(new Error('Wallet button is not mounted'));
+    updateOrder: ((
+      intentOrCreate:
+        | PaymentIntent
+        | ((ctx: UpdateOrderContext) => Promise<PaymentIntent>)
+    ) => {
+      liveKeys.current.updateStarted = true;
+      if (typeof intentOrCreate !== 'function') {
+        liveKeys.current.intent = intentSnapshot(intentOrCreate);
       }
-      return orderQueue.start((requestId) => {
-        Commands.updateOrder(
-          node,
-          nextIntent.orderPayload,
-          nextIntent.orderChecksum,
-          requestId
-        );
-      });
-    },
+      return updater.updateOrder(intentOrCreate);
+    }) as WalletPayButtonRef['updateOrder'],
     updateAppearance: (nextAppearance) => {
       liveKeys.current.appearance = appearanceSnapshot(
         resolvedConfiguration,
@@ -181,16 +237,31 @@ export const WalletPayButton = forwardRef<
           isProcessing: event.nativeEvent.isProcessing,
         })
       }
-      onResult={(event: NativeSyntheticEvent<{ resultJson: string }>) =>
-        onResult?.(parsePaymentResult(event.nativeEvent.resultJson))
-      }
+      onResult={(event: NativeSyntheticEvent<{ resultJson: string }>) => {
+        const result = parsePaymentResult(event.nativeEvent.resultJson);
+        if (result.status === 'failed') {
+          markNativePrepareAcked(liveKeys);
+        }
+        onResult?.(result);
+      }}
       onOrderUpdated={(
         event: NativeSyntheticEvent<{
           requestId: string;
           success: boolean;
           error?: string;
         }>
-      ) => orderQueue.settle(event.nativeEvent)}
+      ) => updater.settle(event.nativeEvent)}
+      onUpdateFailed={(
+        event: NativeSyntheticEvent<{ code: string; message: string }>
+      ) =>
+        onEvent?.({
+          type: 'updateFailed',
+          error: sanitizePaymentError(
+            event.nativeEvent.code,
+            event.nativeEvent.message
+          ),
+        })
+      }
       onAvailability={(
         event: NativeSyntheticEvent<{
           isAvailable: boolean;
@@ -199,7 +270,6 @@ export const WalletPayButton = forwardRef<
           isInteractionEnabled: boolean;
         }>
       ) => {
-        markNativePrepareAcked(liveKeys);
         onEvent?.(toAvailabilityEvent(event.nativeEvent));
       }}
       onHeightChange={(event: NativeSyntheticEvent<{ height: number }>) => {

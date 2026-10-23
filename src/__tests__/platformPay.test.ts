@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeEventEmitter, Platform } from 'react-native';
 import type { Spec } from '../specs/NativeXMoneyPaymentSheet';
 
 jest.mock('../specs/NativeXMoneyPaymentSheet', () => ({
@@ -16,13 +16,20 @@ jest.mock('../specs/NativeXMoneyPaymentSheet', () => ({
     getApplePayState: jest.fn(),
     getGooglePayState: jest.fn(),
     updateApplePayOrder: jest.fn(),
+    beginApplePayUpdateOrder: jest.fn(),
+    resolveApplePayOrder: jest.fn(),
+    rejectApplePayOrder: jest.fn(),
     updateGooglePayOrder: jest.fn(),
+    beginGooglePayUpdateOrder: jest.fn(),
+    resolveGooglePayOrder: jest.fn(),
+    rejectGooglePayOrder: jest.fn(),
     answerCardHolderVerification: jest.fn(),
     addListener: jest.fn(),
     removeListeners: jest.fn(),
   },
 }));
 
+import { EVENT_NAME } from '../nativeModule';
 import NativeXMoneyPaymentSheet from '../specs/NativeXMoneyPaymentSheet';
 import { ApplePay, resetApplePayState } from '../ApplePay';
 import { GooglePay, resetGooglePayState } from '../GooglePay';
@@ -33,7 +40,11 @@ const presentGooglePay = native.presentGooglePay as jest.Mock;
 const getApplePayState = native.getApplePayState as jest.Mock;
 const getGooglePayState = native.getGooglePayState as jest.Mock;
 const updateApplePayOrder = native.updateApplePayOrder as jest.Mock;
+const beginApplePayUpdateOrder = native.beginApplePayUpdateOrder as jest.Mock;
+const resolveApplePayOrder = native.resolveApplePayOrder as jest.Mock;
 const updateGooglePayOrder = native.updateGooglePayOrder as jest.Mock;
+const beginGooglePayUpdateOrder = native.beginGooglePayUpdateOrder as jest.Mock;
+const resolveGooglePayOrder = native.resolveGooglePayOrder as jest.Mock;
 
 const config = { publicKey: 'pk_test_x' };
 const intent = { orderPayload: 'payload', orderChecksum: 'checksum' };
@@ -50,7 +61,11 @@ describe('ApplePay / GooglePay', () => {
     getApplePayState.mockReset();
     getGooglePayState.mockReset();
     updateApplePayOrder.mockReset();
+    beginApplePayUpdateOrder.mockReset();
+    resolveApplePayOrder.mockReset();
     updateGooglePayOrder.mockReset();
+    beginGooglePayUpdateOrder.mockReset();
+    resolveGooglePayOrder.mockReset();
   });
 
   it('ApplePay.present fails on Android without calling native', async () => {
@@ -189,6 +204,98 @@ describe('ApplePay / GooglePay', () => {
     await ApplePay.init(config);
     await expect(ApplePay.updateOrder(intent)).resolves.toBeUndefined();
     expect(updateApplePayOrder).toHaveBeenCalled();
+  });
+
+  it('GooglePay.present delivers updateFailed', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'android' });
+    const handlers: Array<(event: unknown) => void> = [];
+    const spy = jest
+      .spyOn(NativeEventEmitter.prototype, 'addListener')
+      .mockImplementation((_eventType, handler) => {
+        handlers.push(handler as (event: unknown) => void);
+        return { remove: jest.fn() } as never;
+      });
+    presentGooglePay.mockImplementation(() => new Promise(() => {}));
+    const seen: unknown[] = [];
+    const pending = GooglePay.present(intent, (event) => {
+      seen.push(event);
+    });
+    await Promise.resolve();
+    const requestId = presentGooglePay.mock.calls[0]?.[0]?.requestId;
+    handlers.forEach((handler) =>
+      handler({
+        requestId,
+        type: 'onUpdateFailed',
+        code: 'LOAD_ERROR',
+        message: 'Failed to load',
+      })
+    );
+    expect(seen).toEqual([
+      {
+        type: 'updateFailed',
+        error: { code: 'LOAD_ERROR', message: 'Failed to load' },
+      },
+    ]);
+    expect(pending).toBeInstanceOf(Promise);
+    expect(handlers.length).toBeGreaterThan(0);
+    expect(EVENT_NAME).toBe('XMoneyPaymentSheetEvent');
+    spy.mockRestore();
+  });
+
+  it('ApplePay.updateOrder(createOrder) locks before the callback on iOS', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'ios' });
+    let finish: () => void = () => {};
+    beginApplePayUpdateOrder.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    resolveApplePayOrder.mockImplementation(() => {
+      finish();
+    });
+    await ApplePay.init(config);
+    await expect(
+      ApplePay.updateOrder(async () => intent)
+    ).resolves.toEqual(intent);
+    expect(beginApplePayUpdateOrder).toHaveBeenCalled();
+    expect(resolveApplePayOrder).toHaveBeenCalled();
+    expect(updateApplePayOrder).not.toHaveBeenCalled();
+  });
+
+  it('GooglePay.updateOrder(createOrder) does not run the callback when the overlay is closed', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'android' });
+    const createOrder = jest.fn(async () => intent);
+    await expect(GooglePay.updateOrder(createOrder)).rejects.toMatchObject({
+      code: 'GOOGLE_PAY',
+      message: 'Google Pay is not presented',
+    });
+    expect(createOrder).not.toHaveBeenCalled();
+    expect(beginGooglePayUpdateOrder).not.toHaveBeenCalled();
+  });
+
+  it('GooglePay.updateOrder(createOrder) locks before the callback on Android', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'android' });
+    presentGooglePay.mockImplementation(() => new Promise(() => {}));
+    const open = GooglePay.present(intent);
+    expect(open).toBeInstanceOf(Promise);
+    let finish: () => void = () => {};
+    beginGooglePayUpdateOrder.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    resolveGooglePayOrder.mockImplementation(() => {
+      finish();
+    });
+    await GooglePay.init(config);
+    await expect(
+      GooglePay.updateOrder(async () => intent)
+    ).resolves.toEqual(intent);
+    expect(beginGooglePayUpdateOrder).toHaveBeenCalled();
+    expect(resolveGooglePayOrder).toHaveBeenCalled();
+    expect(updateGooglePayOrder).not.toHaveBeenCalled();
   });
 
   it('GooglePay.updateOrder calls native on Android', async () => {

@@ -1,15 +1,24 @@
-import type {
-  AppearanceColors,
-  AppearanceConfig,
-  PaymentConfig,
-  PaymentResult,
-  UserInterfaceStyle,
-  WalletAppearance,
+import {
+  XMoneyPaymentError,
+  type AppearanceColors,
+  type AppearanceConfig,
+  type PaymentConfig,
+  type PaymentResult,
+  type UserInterfaceStyle,
+  type WalletAppearance,
 } from '@xmoney/react-native';
 import {AppearanceHex, ExampleColors} from './theme/ExampleColors';
 import {secrets} from './secrets';
 
 export const SAMPLE_AMOUNT_MINOR = 1999;
+
+/** A newer `updateOrder` replaced this one. The newer call owns the result. */
+export function isSupersededUpdate(error: unknown): boolean {
+  return (
+    error instanceof XMoneyPaymentError &&
+    error.code === 'SUPERSEDED_UPDATE_ORDER'
+  );
+}
 
 export function exampleForcedStyle(dark: boolean): UserInterfaceStyle {
   return dark ? 'alwaysDark' : 'alwaysLight';
@@ -125,9 +134,13 @@ export function formatMoney(amountMinor: number, currency = secrets.CURRENCY): s
   }
 }
 
-/** Native checkout has bound — dismiss the preparing overlay. */
+/**
+ * The native surface has drawn — dismiss the preparing overlay.
+ * Availability can arrive while the loader is still running, so it does not
+ * reveal the element or wallet button.
+ */
 export function isNativeBoundEvent(event: {type: string}): boolean {
-  return event.type === 'ready' || event.type === 'availability';
+  return event.type === 'ready';
 }
 
 export function bindFailureMessage(result: PaymentResult): string | null {

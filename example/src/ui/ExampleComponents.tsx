@@ -743,6 +743,7 @@ const styles = StyleSheet.create({
   gateSurface: {width: '100%', overflow: 'visible'},
   gateOverlay: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
     justifyContent: 'center',
   },
   sectionHeader: {paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, gap: 4},

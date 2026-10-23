@@ -55,5 +55,19 @@ describe('STABLE_MESSAGES', () => {
     expect(STABLE_MESSAGES.SUPERSEDED_UPDATE_ORDER).toBe(
       'Superseded by a newer updateOrder call'
     );
+    expect(STABLE_MESSAGES.PAYMENT_IN_PROGRESS).toBe('Payment in progress');
+    expect(STABLE_MESSAGES.ORDER_CREATION_FAILED).toBe('Order creation failed');
+  });
+
+  it('maps PAYMENT_IN_PROGRESS to the stable message', () => {
+    expect(
+      XMoneyPaymentError.from({
+        code: 'PAYMENT_IN_PROGRESS',
+        message: 'Payment in progress',
+      })
+    ).toMatchObject({
+      code: 'PAYMENT_IN_PROGRESS',
+      message: 'Payment in progress',
+    });
   });
 });

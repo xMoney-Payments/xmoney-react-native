@@ -1,7 +1,7 @@
 import { NativeEventEmitter, Platform } from 'react-native';
 import NativeXMoneyPaymentSheet from './specs/NativeXMoneyPaymentSheet';
-import { XMoneyPaymentError } from './errors';
-import type { PaymentSheetEvent } from './types';
+import { sanitizePaymentError, XMoneyPaymentError } from './errors';
+import type { PaymentSheetEvent, UpdateFailedEvent } from './types';
 
 const LINKING_ERROR =
   `The package '@xmoney/react-native' doesn't seem to be linked. Make sure: \n\n` +
@@ -13,8 +13,10 @@ export const EVENT_NAME = 'XMoneyPaymentSheetEvent';
 
 export interface NativeEventPayload {
   requestId: string;
-  type: 'onReady' | 'onProcessing';
+  type: 'onReady' | 'onProcessing' | 'onUpdateFailed';
   isProcessing?: boolean;
+  code?: string;
+  message?: string;
 }
 
 let requestCounter = 0;
@@ -45,12 +47,17 @@ export function getEmitter(): NativeEventEmitter | null {
 
 export function toPaymentSheetEvent(
   event: NativeEventPayload
-): PaymentSheetEvent | null {
+): PaymentSheetEvent | UpdateFailedEvent | null {
   switch (event.type) {
     case 'onReady':
       return { type: 'ready' };
     case 'onProcessing':
       return { type: 'processing', isProcessing: event.isProcessing ?? false };
+    case 'onUpdateFailed':
+      return {
+        type: 'updateFailed',
+        error: sanitizePaymentError(event.code, event.message),
+      };
     default:
       return null;
   }
@@ -58,7 +65,7 @@ export function toPaymentSheetEvent(
 
 export function subscribeNativeEvents(
   requestId: string,
-  onEvent?: (event: PaymentSheetEvent) => void
+  onEvent?: (event: PaymentSheetEvent | UpdateFailedEvent) => void
 ) {
   return getEmitter()?.addListener(
     EVENT_NAME,

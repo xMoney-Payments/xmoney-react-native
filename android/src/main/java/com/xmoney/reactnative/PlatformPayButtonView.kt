@@ -34,7 +34,6 @@ import com.xmoney.payments.config.PaymentConfig
 import com.xmoney.payments.model.PaymentError
 import com.xmoney.payments.model.PaymentIntent
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 
 class PlatformPayButtonView(private val reactContext: ThemedReactContext) : FrameLayout(reactContext) {
     private data class Prepared(val config: PaymentConfig, val intent: PaymentIntent)
@@ -47,6 +46,10 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
     private var prepared by mutableStateOf<Prepared?>(null)
     private var disabledState by mutableStateOf(false)
     private var controllerRef: GooglePayController? = null
+    private val orders = PendingOrders()
+    private val updates = OrderUpdateLaunch()
+    private var boundConfiguration: Map<String, Any?>? = null
+    private var layoutScheduled = false
 
     var configuration: Map<String, Any?>? = null
     var appearance: Map<String, Any?>? = null
@@ -69,6 +72,25 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
         addView(composeView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
 
+    // React Native parents drop requestLayout, so Compose content and the
+    // Google Pay view inside it would stay at 0 height.
+    override fun requestLayout() {
+        super.requestLayout()
+        if (layoutScheduled) return
+        layoutScheduled = true
+        post {
+            layoutScheduled = false
+            // The screen can close before this runs. Measuring a detached
+            // ComposeView throws "Cannot locate windowRecomposer".
+            if (!isAttachedToWindow || !composeView.isAttachedToWindow) return@post
+            composeView.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            )
+            composeView.layout(0, 0, composeView.measuredWidth, composeView.measuredHeight)
+        }
+    }
+
     fun setConfigurationMap(value: ReadableMap?) {
         configuration = value.toStringKeyedMap()
     }
@@ -78,8 +100,15 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
     }
 
     fun prepare(orderPayload: String, orderChecksum: String) {
+        val nextConfig = configuration
+        val sameOrder = prepared != null &&
+            orderPayload == this.orderPayload &&
+            orderChecksum == this.orderChecksum &&
+            nextConfig == boundConfiguration
+        if (sameOrder) return
         this.orderPayload = orderPayload
         this.orderChecksum = orderChecksum
+        this.boundConfiguration = nextConfig
         bind()
     }
 
@@ -87,6 +116,18 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
         this.orderPayload = orderPayload
         this.orderChecksum = orderChecksum
         runUpdateOrder(requestId)
+    }
+
+    fun beginUpdateOrder(requestId: String) {
+        runBeginUpdateOrder(requestId)
+    }
+
+    fun resolveOrder(orderPayload: String, orderChecksum: String, requestId: String) {
+        orders.settle(requestId, BridgeConfigParser.parseIntent(orderPayload, orderChecksum))
+    }
+
+    fun rejectOrder(requestId: String) {
+        orders.settleRejected(requestId)
     }
 
     fun updateAppearance(appearanceJson: String) {
@@ -111,6 +152,8 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
     }
 
     override fun onDetachedFromWindow() {
+        updates.cancel()
+        orders.cancelAll()
         owners?.detach()
         owners = null
         contentInstalled = false
@@ -144,12 +187,14 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
                 val isInteractionEnabled = controller.isInteractionEnabled
                 SideEffect {
                     controllerRef = controller
-                    emitAvailability(
-                        isAvailable = isAvailable,
-                        isReady = isReady,
-                        isOrderConsumed = isOrderConsumed,
-                        isInteractionEnabled = isInteractionEnabled,
-                    )
+                    if (didReady) {
+                        emitAvailability(
+                            isAvailable = isAvailable,
+                            isReady = isReady,
+                            isOrderConsumed = isOrderConsumed,
+                            isInteractionEnabled = isInteractionEnabled,
+                        )
+                    }
                 }
                 Box(Modifier.fillMaxWidth().height(56.dp)) {
                     GooglePayButton(
@@ -158,7 +203,15 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         onEvent = { event ->
                             when (event) {
-                                GooglePayEvent.Ready -> emitReady()
+                                GooglePayEvent.Ready -> {
+                                    emitReady()
+                                    emitAvailability(
+                                        isAvailable = isAvailable,
+                                        isReady = isReady,
+                                        isOrderConsumed = isOrderConsumed,
+                                        isInteractionEnabled = isInteractionEnabled,
+                                    )
+                                }
                                 is GooglePayEvent.Processing -> {
                                     emitNativeEvent(
                                         "onProcessing",
@@ -167,6 +220,7 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
                                         },
                                     )
                                 }
+                                is GooglePayEvent.UpdateFailed -> emitUpdateFailed(event.error)
                             }
                         },
                     )
@@ -176,7 +230,6 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
                 }
             }
         }
-        emitReady()
         reportHeight()
     }
 
@@ -194,11 +247,6 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
     }
 
     private fun runUpdateOrder(requestId: String) {
-        val controller = controllerRef
-        if (controller == null) {
-            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
-            return
-        }
         val intent = try {
             BridgeConfigParser.parseIntent(orderPayload, orderChecksum)
         } catch (error: Exception) {
@@ -207,17 +255,110 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
             emitOrderUpdated(requestId, false, mapped.first)
             return
         }
-        val activity = reactContext.currentActivity as? FragmentActivity ?: return
-        activity.lifecycleScope.launch {
+        // Prop-driven updates go through the Compose host so it can defer a
+        // change during a charge and clear a stale-order lock.
+        if (requestId.isEmpty()) {
+            val current = prepared
+            if (current != null) {
+                prepared = current.copy(intent = intent)
+            }
+            return
+        }
+        val controller = controllerRef
+        if (controller == null) {
+            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
+            return
+        }
+        val activity = reactContext.currentActivity as? FragmentActivity
+        if (activity == null) {
+            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
+            return
+        }
+        updates.start(activity.lifecycleScope) { generation ->
             try {
                 controller.updateOrder(intent)
+                if (!updates.isCurrent(generation)) {
+                    emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+                    return@start
+                }
+                prepared = prepared?.copy(intent = intent)
                 emitOrderUpdated(requestId, true, null)
             } catch (_: CancellationException) {
                 emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
             } catch (error: Exception) {
-                emitOrderUpdated(requestId, false, nativeError(error).first)
+                val mapped = nativeError(error)
+                reportLoadFailureIfNeeded(mapped.first, mapped.second)
+                emitOrderUpdated(requestId, false, mapped.first)
             }
         }
+    }
+
+    private fun runBeginUpdateOrder(requestId: String) {
+        if (orders.isFinished(requestId)) {
+            emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+            return
+        }
+        val deferred = orders.gate(requestId)
+        val controller = controllerRef
+        val activity = reactContext.currentActivity as? FragmentActivity
+        if (deferred == null || controller == null || activity == null) {
+            orders.close(requestId)
+            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
+            return
+        }
+        updates.start(activity.lifecycleScope) { generation ->
+            try {
+                val bound = controller.updateOrder(createOrder = {
+                    emitAvailability(
+                        isAvailable = controller.isAvailable,
+                        isReady = controller.isReady,
+                        isOrderConsumed = controller.isOrderConsumed,
+                        isInteractionEnabled = controller.isInteractionEnabled,
+                    )
+                    deferred.await()
+                })
+                if (!updates.isCurrent(generation)) {
+                    emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+                    return@start
+                }
+                prepared = prepared?.copy(intent = bound)
+                orderPayload = bound.orderPayload
+                orderChecksum = bound.orderChecksum
+                emitAvailability(
+                    isAvailable = controller.isAvailable,
+                    isReady = controller.isReady,
+                    isOrderConsumed = controller.isOrderConsumed,
+                    isInteractionEnabled = controller.isInteractionEnabled,
+                )
+                emitOrderUpdated(requestId, true, null)
+            } catch (_: OrderCreationRejected) {
+                emitOrderUpdated(requestId, false, "ORDER_CREATION_FAILED")
+            } catch (_: CancellationException) {
+                emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+            } catch (error: Exception) {
+                val mapped = nativeError(error)
+                reportLoadFailureIfNeeded(mapped.first, mapped.second)
+                emitOrderUpdated(requestId, false, mapped.first)
+            } finally {
+                orders.close(requestId)
+            }
+        }
+    }
+
+    private fun reportLoadFailureIfNeeded(code: String, message: String) {
+        if (didReady) return
+        emitFailed(code, message)
+    }
+
+    private fun emitUpdateFailed(error: PaymentError) {
+        val mapped = nativeError(error)
+        emitNativeEvent(
+            "onUpdateFailed",
+            Arguments.createMap().apply {
+                putString("code", mapped.first)
+                putString("message", mapped.second)
+            },
+        )
     }
 
     private fun emitFailed(code: String, message: String) {
@@ -253,6 +394,8 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
         isOrderConsumed: Boolean,
         isInteractionEnabled: Boolean,
     ) {
+        // The button has not drawn until ready.
+        if (!didReady) return
         emitNativeEvent(
             "onAvailability",
             Arguments.createMap().apply {
@@ -275,6 +418,7 @@ class PlatformPayButtonView(private val reactContext: ThemedReactContext) : Fram
 }
 
 private fun nativeError(error: Throwable): Pair<String, String> = when (error) {
+    is PaymentError.PaymentInProgress -> "PAYMENT_IN_PROGRESS" to error.merchantMessage()
     is PaymentError -> error.code to error.merchantMessage()
     else -> "PRESENT_ERROR" to "Failed to present"
 }

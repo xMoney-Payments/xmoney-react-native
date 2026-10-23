@@ -577,7 +577,7 @@ function PlaygroundCheckout({
             key={`${mode}|${structuralKey}|${session}`}
             ready={ready}
             message={preparingMessage}
-            minHeight={48}>
+            minHeight={56}>
             {Platform.OS === 'ios' ? (
               <ApplePayButton
                 configuration={configuration}
@@ -645,5 +645,5 @@ const styles = StyleSheet.create({
   amountStep: {paddingHorizontal: 10, paddingVertical: 8},
   stepDisabled: {opacity: 0.35},
   stepHint: {fontSize: 13, fontWeight: '600', minWidth: 44, textAlign: 'center'},
-  walletButton: {height: 48},
+  walletButton: {height: 56},
 });

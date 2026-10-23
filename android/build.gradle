@@ -24,7 +24,8 @@ def getExtOrDefault(name) {
 }
 
 def isNewArchitectureEnabled() {
-  return true
+  return rootProject.hasProperty("newArchEnabled") &&
+    rootProject.getProperty("newArchEnabled") == "true"
 }
 
 apply plugin: "com.android.library"
@@ -92,9 +93,9 @@ dependencies {
   implementation "com.facebook.react:react-android"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
-  implementation "com.xmoney:paymentsheet:1.0.0"
-  implementation "com.xmoney:paymentelement:1.0.0"
-  implementation "com.xmoney:googlepay:1.0.0"
+  implementation "com.xmoney:paymentsheet:1.1.0"
+  implementation "com.xmoney:paymentelement:1.1.0"
+  implementation "com.xmoney:googlepay:1.1.0"
 
   implementation platform("androidx.compose:compose-bom:2024.09.03")
   implementation "androidx.compose.ui:ui"

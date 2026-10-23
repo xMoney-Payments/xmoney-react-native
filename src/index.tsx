@@ -65,6 +65,8 @@ export type {
   SubmitButtonType,
   Transaction,
   TransactionCustomer,
+  UpdateFailedEvent,
+  UpdateOrderContext,
   UserInterfaceStyle,
   ValidationMode,
   ApplePayAppearance,

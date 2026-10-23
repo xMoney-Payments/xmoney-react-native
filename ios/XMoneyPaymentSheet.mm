@@ -2,7 +2,9 @@
 
 #import <React/RCTBridgeModule.h>
 #import <React/RCTUtils.h>
+#ifdef RCT_NEW_ARCH_ENABLED
 #import <ReactCommon/RCTTurboModule.h>
+#endif
 
 #if __has_include(<XMoneyPaymentSheetSpec/XMoneyPaymentSheetSpec.h>)
 #import <XMoneyPaymentSheetSpec/XMoneyPaymentSheetSpec.h>
@@ -56,14 +58,14 @@ RCT_EXPORT_MODULE()
   _hasListeners = NO;
 }
 
-- (void)initPaymentSheet:(NSDictionary *)configuration
+RCT_EXPORT_METHOD(initPaymentSheet:(NSDictionary *)configuration)
 {
   [[XMoneyPaymentSheetHost shared] initPaymentSheet:configuration];
 }
 
-- (void)presentPaymentSheet:(NSDictionary *)intent
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
+RCT_EXPORT_METHOD(presentPaymentSheet:(NSDictionary *)intent
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   __weak __typeof(self) weakSelf = self;
   [[XMoneyPaymentSheetHost shared]
@@ -83,19 +85,19 @@ RCT_EXPORT_MODULE()
       }];
 }
 
-- (void)dismiss
+RCT_EXPORT_METHOD(dismiss)
 {
   [[XMoneyPaymentSheetHost shared] dismiss];
 }
 
-- (void)initApplePay:(NSDictionary *)configuration
+RCT_EXPORT_METHOD(initApplePay:(NSDictionary *)configuration)
 {
   [[XMoneyPaymentSheetHost shared] initApplePay:configuration];
 }
 
-- (void)presentApplePay:(NSDictionary *)intent
-                resolve:(RCTPromiseResolveBlock)resolve
-                 reject:(RCTPromiseRejectBlock)reject
+RCT_EXPORT_METHOD(presentApplePay:(NSDictionary *)intent
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   __weak __typeof(self) weakSelf = self;
   [[XMoneyPaymentSheetHost shared]
@@ -115,19 +117,19 @@ RCT_EXPORT_MODULE()
       }];
 }
 
-- (void)dismissApplePay
+RCT_EXPORT_METHOD(dismissApplePay)
 {
   [[XMoneyPaymentSheetHost shared] dismissApplePay];
 }
 
-- (void)initGooglePay:(NSDictionary *)configuration
+RCT_EXPORT_METHOD(initGooglePay:(NSDictionary *)configuration)
 {
   [[XMoneyPaymentSheetHost shared] initGooglePay:configuration];
 }
 
-- (void)presentGooglePay:(NSDictionary *)intent
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
+RCT_EXPORT_METHOD(presentGooglePay:(NSDictionary *)intent
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   [[XMoneyPaymentSheetHost shared]
       presentGooglePay:intent
@@ -141,28 +143,28 @@ RCT_EXPORT_MODULE()
       }];
 }
 
-- (void)dismissGooglePay
+RCT_EXPORT_METHOD(dismissGooglePay)
 {
   [[XMoneyPaymentSheetHost shared] dismissGooglePay];
 }
 
-- (void)getApplePayState:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
+RCT_EXPORT_METHOD(getApplePayState:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   resolve([[XMoneyPaymentSheetHost shared] applePayState]);
 }
 
-- (void)getGooglePayState:(NSDictionary *)intent
+RCT_EXPORT_METHOD(getGooglePayState:(NSDictionary *)intent
                   resolve:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   (void)intent;
   resolve([[XMoneyPaymentSheetHost shared] googlePayState]);
 }
 
-- (void)updateApplePayOrder:(NSDictionary *)intent
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
+RCT_EXPORT_METHOD(updateApplePayOrder:(NSDictionary *)intent
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   [[XMoneyPaymentSheetHost shared]
       updateApplePayOrder:intent
@@ -174,9 +176,38 @@ RCT_EXPORT_MODULE()
       }];
 }
 
-- (void)updateGooglePayOrder:(NSDictionary *)intent
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject
+RCT_EXPORT_METHOD(beginApplePayUpdateOrder:(NSString *)requestId
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+  [[XMoneyPaymentSheetHost shared]
+      beginApplePayUpdateOrder:requestId
+      onResolve:^(NSDictionary *result) {
+        resolve(result);
+      }
+      onReject:^(NSString *code, NSString *message) {
+        reject(code, message, nil);
+      }];
+}
+
+RCT_EXPORT_METHOD(resolveApplePayOrder:(NSString *)requestId
+                  orderPayload:(NSString *)orderPayload
+                  orderChecksum:(NSString *)orderChecksum)
+{
+  [[XMoneyPaymentSheetHost shared]
+      resolveApplePayOrder:requestId
+              orderPayload:orderPayload
+             orderChecksum:orderChecksum];
+}
+
+RCT_EXPORT_METHOD(rejectApplePayOrder:(NSString *)requestId)
+{
+  [[XMoneyPaymentSheetHost shared] rejectApplePayOrder:requestId];
+}
+
+RCT_EXPORT_METHOD(updateGooglePayOrder:(NSDictionary *)intent
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 {
   [[XMoneyPaymentSheetHost shared]
       updateGooglePayOrder:intent
@@ -188,7 +219,36 @@ RCT_EXPORT_MODULE()
       }];
 }
 
-- (void)answerCardHolderVerification:(NSString *)requestId accepted:(BOOL)accepted
+RCT_EXPORT_METHOD(beginGooglePayUpdateOrder:(NSString *)requestId
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+  [[XMoneyPaymentSheetHost shared]
+      beginGooglePayUpdateOrder:requestId
+      onResolve:^(NSDictionary *result) {
+        resolve(result);
+      }
+      onReject:^(NSString *code, NSString *message) {
+        reject(code, message, nil);
+      }];
+}
+
+RCT_EXPORT_METHOD(resolveGooglePayOrder:(NSString *)requestId
+                  orderPayload:(NSString *)orderPayload
+                  orderChecksum:(NSString *)orderChecksum)
+{
+  [[XMoneyPaymentSheetHost shared]
+      resolveGooglePayOrder:requestId
+               orderPayload:orderPayload
+              orderChecksum:orderChecksum];
+}
+
+RCT_EXPORT_METHOD(rejectGooglePayOrder:(NSString *)requestId)
+{
+  [[XMoneyPaymentSheetHost shared] rejectGooglePayOrder:requestId];
+}
+
+RCT_EXPORT_METHOD(answerCardHolderVerification:(NSString *)requestId accepted:(BOOL)accepted)
 {
   [[XMoneyPaymentSheetHost shared] answerCardHolderVerification:requestId accepted:accepted];
 }
@@ -203,10 +263,12 @@ RCT_EXPORT_MODULE()
   [super removeListeners:(NSInteger)count];
 }
 
+#ifdef RCT_NEW_ARCH_ENABLED
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {
   return std::make_shared<facebook::react::NativeXMoneyPaymentSheetSpecJSI>(params);
 }
+#endif
 
 @end

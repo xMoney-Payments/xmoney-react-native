@@ -19,7 +19,21 @@ export interface Spec extends TurboModule {
   getApplePayState(): Promise<Object>;
   getGooglePayState(intent: Object): Promise<Object>;
   updateApplePayOrder(intent: Object): Promise<void>;
+  beginApplePayUpdateOrder(requestId: string): Promise<void>;
+  resolveApplePayOrder(
+    requestId: string,
+    orderPayload: string,
+    orderChecksum: string
+  ): void;
+  rejectApplePayOrder(requestId: string): void;
   updateGooglePayOrder(intent: Object): Promise<void>;
+  beginGooglePayUpdateOrder(requestId: string): Promise<void>;
+  resolveGooglePayOrder(
+    requestId: string,
+    orderPayload: string,
+    orderChecksum: string
+  ): void;
+  rejectGooglePayOrder(requestId: string): void;
   answerCardHolderVerification(requestId: string, accepted: boolean): void;
   addListener(eventName: string): void;
   removeListeners(count: number): void;

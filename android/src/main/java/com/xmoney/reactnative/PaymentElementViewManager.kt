@@ -2,7 +2,6 @@ package com.xmoney.reactnative
 
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.common.MapBuilder
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.annotations.ReactProp
@@ -18,16 +17,18 @@ class PaymentElementViewManager : SimpleViewManager<PaymentElementView>() {
         view.setConfigurationMap(value)
     }
 
-    override fun getCommandsMap(): MutableMap<String, Int> =
-        MapBuilder.of(
-            "prepare", COMMAND_PREPARE,
-            "confirm", COMMAND_CONFIRM,
-            "updateOrder", COMMAND_UPDATE_ORDER,
-            "updateAppearance", COMMAND_UPDATE_APPEARANCE,
-            "updateLocale", COMMAND_UPDATE_LOCALE,
-            "updateStyle", COMMAND_UPDATE_STYLE,
-            "updateWalletAppearance", COMMAND_UPDATE_WALLET_APPEARANCE,
-        )
+    override fun getCommandsMap(): MutableMap<String, Int> = mutableMapOf(
+        "prepare" to COMMAND_PREPARE,
+        "confirm" to COMMAND_CONFIRM,
+        "updateOrder" to COMMAND_UPDATE_ORDER,
+        "beginUpdateOrder" to COMMAND_BEGIN_UPDATE_ORDER,
+        "resolveOrder" to COMMAND_RESOLVE_ORDER,
+        "rejectOrder" to COMMAND_REJECT_ORDER,
+        "updateAppearance" to COMMAND_UPDATE_APPEARANCE,
+        "updateLocale" to COMMAND_UPDATE_LOCALE,
+        "updateStyle" to COMMAND_UPDATE_STYLE,
+        "updateWalletAppearance" to COMMAND_UPDATE_WALLET_APPEARANCE,
+    )
 
     override fun receiveCommand(
         root: PaymentElementView,
@@ -42,6 +43,13 @@ class PaymentElementViewManager : SimpleViewManager<PaymentElementView>() {
                 args?.getString(1).orEmpty(),
                 args?.getString(2).orEmpty(),
             )
+            "beginUpdateOrder" -> root.beginUpdateOrder(args?.getString(0).orEmpty())
+            "resolveOrder" -> root.resolveOrder(
+                args?.getString(0).orEmpty(),
+                args?.getString(1).orEmpty(),
+                args?.getString(2).orEmpty(),
+            )
+            "rejectOrder" -> root.rejectOrder(args?.getString(0).orEmpty())
             "updateAppearance" -> root.updateAppearance(args?.getString(0).orEmpty())
             "updateLocale" -> root.updateLocale(args?.getString(0).orEmpty())
             "updateStyle" -> root.updateStyle(args?.getString(0).orEmpty())
@@ -62,6 +70,13 @@ class PaymentElementViewManager : SimpleViewManager<PaymentElementView>() {
                 args?.getString(1).orEmpty(),
                 args?.getString(2).orEmpty(),
             )
+            COMMAND_BEGIN_UPDATE_ORDER -> root.beginUpdateOrder(args?.getString(0).orEmpty())
+            COMMAND_RESOLVE_ORDER -> root.resolveOrder(
+                args?.getString(0).orEmpty(),
+                args?.getString(1).orEmpty(),
+                args?.getString(2).orEmpty(),
+            )
+            COMMAND_REJECT_ORDER -> root.rejectOrder(args?.getString(0).orEmpty())
             COMMAND_UPDATE_APPEARANCE -> root.updateAppearance(args?.getString(0).orEmpty())
             COMMAND_UPDATE_LOCALE -> root.updateLocale(args?.getString(0).orEmpty())
             COMMAND_UPDATE_STYLE -> root.updateStyle(args?.getString(0).orEmpty())
@@ -77,6 +92,7 @@ class PaymentElementViewManager : SimpleViewManager<PaymentElementView>() {
             "onHeightChange",
             "onAvailability",
             "onOrderUpdated",
+            "onUpdateFailed",
         )
 
     companion object {
@@ -88,5 +104,8 @@ class PaymentElementViewManager : SimpleViewManager<PaymentElementView>() {
         const val COMMAND_UPDATE_LOCALE = 5
         const val COMMAND_UPDATE_STYLE = 6
         const val COMMAND_UPDATE_WALLET_APPEARANCE = 7
+        const val COMMAND_BEGIN_UPDATE_ORDER = 8
+        const val COMMAND_RESOLVE_ORDER = 9
+        const val COMMAND_REJECT_ORDER = 10
     }
 }

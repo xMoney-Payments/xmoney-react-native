@@ -100,11 +100,11 @@ export function WalletPaySample({
             <MerchantReadyGate
               ready={ready}
               message={preparing}
-              minHeight={48}>
+              minHeight={56}>
               <Button
                 configuration={configuration}
                 intent={intent}
-                style={{height: 48}}
+                style={{height: 56}}
                 onEvent={(event) => {
                   if (isNativeBoundEvent(event)) {
                     setReady(true);

@@ -29,6 +29,7 @@ export const DemoCheckoutBackend = {
     amountMinor?: number;
     currency?: string;
     description?: string;
+    signal?: AbortSignal;
   }): Promise<PaymentIntent> {
     const blocked = DemoCheckoutBackend.secretsError();
     if (blocked) {
@@ -49,6 +50,7 @@ export const DemoCheckoutBackend = {
         publicKey: secrets.PUBLIC_KEY,
         apiKey: secrets.API_KEY,
       }),
+      signal: options?.signal,
     });
     const json = (await response.json().catch(() => ({}))) as {
       payload?: string;

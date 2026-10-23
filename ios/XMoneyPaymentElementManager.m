@@ -27,6 +27,7 @@ RCT_EXPORT_VIEW_PROPERTY(onResult, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onHeightChange, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onAvailability, RCTDirectEventBlock)
 RCT_EXPORT_VIEW_PROPERTY(onOrderUpdated, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onUpdateFailed, RCTDirectEventBlock)
 
 RCT_EXPORT_METHOD(prepare:(nonnull NSNumber *)reactTag
                   orderPayload:(NSString *)orderPayload
@@ -49,6 +50,41 @@ RCT_EXPORT_METHOD(updateOrder:(nonnull NSNumber *)reactTag
     XMoneyPaymentElementView *view = (XMoneyPaymentElementView *)viewRegistry[reactTag];
     if ([view isKindOfClass:[XMoneyPaymentElementView class]]) {
       [view updateOrderWithOrderPayload:orderPayload orderChecksum:orderChecksum requestId:requestId];
+    }
+  }];
+}
+
+RCT_EXPORT_METHOD(beginUpdateOrder:(nonnull NSNumber *)reactTag
+                  requestId:(NSString *)requestId)
+{
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
+    XMoneyPaymentElementView *view = (XMoneyPaymentElementView *)viewRegistry[reactTag];
+    if ([view isKindOfClass:[XMoneyPaymentElementView class]]) {
+      [view beginUpdateOrderWithRequestId:requestId];
+    }
+  }];
+}
+
+RCT_EXPORT_METHOD(resolveOrder:(nonnull NSNumber *)reactTag
+                  orderPayload:(NSString *)orderPayload
+                  orderChecksum:(NSString *)orderChecksum
+                  requestId:(NSString *)requestId)
+{
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
+    XMoneyPaymentElementView *view = (XMoneyPaymentElementView *)viewRegistry[reactTag];
+    if ([view isKindOfClass:[XMoneyPaymentElementView class]]) {
+      [view resolveOrderWithOrderPayload:orderPayload orderChecksum:orderChecksum requestId:requestId];
+    }
+  }];
+}
+
+RCT_EXPORT_METHOD(rejectOrder:(nonnull NSNumber *)reactTag
+                  requestId:(NSString *)requestId)
+{
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
+    XMoneyPaymentElementView *view = (XMoneyPaymentElementView *)viewRegistry[reactTag];
+    if ([view isKindOfClass:[XMoneyPaymentElementView class]]) {
+      [view rejectOrderWithRequestId:requestId];
     }
   }];
 }

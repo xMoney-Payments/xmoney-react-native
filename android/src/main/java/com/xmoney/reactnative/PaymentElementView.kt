@@ -33,7 +33,6 @@ import com.xmoney.payments.config.UserInterfaceStyle
 import com.xmoney.payments.model.PaymentError
 import com.xmoney.payments.model.PaymentIntent
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 
 class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLayout(reactContext) {
     private data class Prepared(val config: PaymentConfig, val intent: PaymentIntent)
@@ -44,6 +43,11 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
     private var contentInstalled = false
     private var prepared by mutableStateOf<Prepared?>(null)
     private var controllerRef: EmbeddedPaymentController? = null
+    private val orders = PendingOrders()
+    private val updates = OrderUpdateLaunch()
+    private var boundConfiguration: Map<String, Any?>? = null
+    private var didSendReady = false
+    private var layoutScheduled = false
 
     var configuration: Map<String, Any?>? = null
 
@@ -64,8 +68,15 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
     }
 
     fun prepare(orderPayload: String, orderChecksum: String) {
+        val nextConfig = configuration
+        val sameOrder = prepared != null &&
+            orderPayload == this.orderPayload &&
+            orderChecksum == this.orderChecksum &&
+            nextConfig == boundConfiguration
+        if (sameOrder) return
         this.orderPayload = orderPayload
         this.orderChecksum = orderChecksum
+        this.boundConfiguration = nextConfig
         bind()
     }
 
@@ -73,6 +84,18 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
         this.orderPayload = orderPayload
         this.orderChecksum = orderChecksum
         runUpdateOrder(requestId)
+    }
+
+    fun beginUpdateOrder(requestId: String) {
+        runBeginUpdateOrder(requestId)
+    }
+
+    fun resolveOrder(orderPayload: String, orderChecksum: String, requestId: String) {
+        orders.settle(requestId, BridgeConfigParser.parseIntent(orderPayload, orderChecksum))
+    }
+
+    fun rejectOrder(requestId: String) {
+        orders.settleRejected(requestId)
     }
 
     fun updateAppearance(appearanceJson: String) {
@@ -107,6 +130,25 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
         }
     }
 
+    // React Native parents drop requestLayout, so Compose content would keep
+    // the size it had before the form existed.
+    override fun requestLayout() {
+        super.requestLayout()
+        if (layoutScheduled) return
+        layoutScheduled = true
+        post {
+            layoutScheduled = false
+            // The screen can close before this runs. Measuring a detached
+            // ComposeView throws "Cannot locate windowRecomposer".
+            if (!isAttachedToWindow || !composeView.isAttachedToWindow) return@post
+            composeView.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            )
+            composeView.layout(0, 0, composeView.measuredWidth, composeView.measuredHeight)
+        }
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         val tree = ComposeTreeOwners()
@@ -122,6 +164,8 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
     }
 
     override fun onDetachedFromWindow() {
+        updates.cancel()
+        orders.cancelAll()
         owners?.detach()
         owners = null
         contentInstalled = false
@@ -152,10 +196,12 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
                 val isInteractionEnabled = controller.isInteractionEnabled
                 SideEffect {
                     controllerRef = controller
-                    emitAvailability(
-                        isOrderConsumed = isOrderConsumed,
-                        isInteractionEnabled = isInteractionEnabled,
-                    )
+                    if (didSendReady) {
+                        emitAvailability(
+                            isOrderConsumed = isOrderConsumed,
+                            isInteractionEnabled = isInteractionEnabled,
+                        )
+                    }
                 }
                 PaymentElement(
                     controller = controller,
@@ -171,8 +217,13 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
                     onEvent = { event ->
                         when (event) {
                             EmbeddedEvent.Ready -> {
+                                didSendReady = true
                                 emitNativeEvent("onReady", Arguments.createMap())
                                 reportHeight()
+                                emitAvailability(
+                                    isOrderConsumed = isOrderConsumed,
+                                    isInteractionEnabled = isInteractionEnabled,
+                                )
                             }
                             is EmbeddedEvent.Processing -> {
                                 emitNativeEvent(
@@ -182,6 +233,7 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
                                     },
                                 )
                             }
+                            is EmbeddedEvent.UpdateFailed -> emitUpdateFailed(event.error)
                         }
                     },
                 )
@@ -203,11 +255,6 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
     }
 
     private fun runUpdateOrder(requestId: String) {
-        val controller = controllerRef
-        if (controller == null) {
-            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
-            return
-        }
         val intent = try {
             BridgeConfigParser.parseIntent(orderPayload, orderChecksum)
         } catch (error: Exception) {
@@ -216,17 +263,106 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
             emitOrderUpdated(requestId, false, mapped.first)
             return
         }
-        val activity = reactContext.currentActivity as? FragmentActivity ?: return
-        activity.lifecycleScope.launch {
+        // Prop-driven updates go through the Compose host so it can defer a
+        // change during a charge and clear a stale-order lock.
+        if (requestId.isEmpty()) {
+            val current = prepared
+            if (current != null) {
+                prepared = current.copy(intent = intent)
+            }
+            return
+        }
+        val controller = controllerRef
+        if (controller == null) {
+            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
+            return
+        }
+        val activity = reactContext.currentActivity as? FragmentActivity
+        if (activity == null) {
+            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
+            return
+        }
+        updates.start(activity.lifecycleScope) { generation ->
             try {
                 controller.updateOrder(intent)
+                if (!updates.isCurrent(generation)) {
+                    emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+                    return@start
+                }
+                prepared = prepared?.copy(intent = intent)
                 emitOrderUpdated(requestId, true, null)
             } catch (_: CancellationException) {
                 emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
             } catch (error: Exception) {
-                emitOrderUpdated(requestId, false, nativeError(error).first)
+                val mapped = nativeError(error)
+                reportLoadFailureIfNeeded(mapped.first, mapped.second)
+                emitOrderUpdated(requestId, false, mapped.first)
             }
         }
+    }
+
+    private fun runBeginUpdateOrder(requestId: String) {
+        if (orders.isFinished(requestId)) {
+            emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+            return
+        }
+        val deferred = orders.gate(requestId)
+        val controller = controllerRef
+        val activity = reactContext.currentActivity as? FragmentActivity
+        if (deferred == null || controller == null || activity == null) {
+            orders.close(requestId)
+            emitOrderUpdated(requestId, false, "NOT_INITIALIZED")
+            return
+        }
+        updates.start(activity.lifecycleScope) { generation ->
+            try {
+                val bound = controller.updateOrder(createOrder = {
+                    emitAvailability(
+                        isOrderConsumed = controller.isOrderConsumed,
+                        isInteractionEnabled = controller.isInteractionEnabled,
+                    )
+                    deferred.await()
+                })
+                if (!updates.isCurrent(generation)) {
+                    emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+                    return@start
+                }
+                prepared = prepared?.copy(intent = bound)
+                orderPayload = bound.orderPayload
+                orderChecksum = bound.orderChecksum
+                emitAvailability(
+                    isOrderConsumed = controller.isOrderConsumed,
+                    isInteractionEnabled = controller.isInteractionEnabled,
+                )
+                emitOrderUpdated(requestId, true, null)
+            } catch (_: OrderCreationRejected) {
+                emitOrderUpdated(requestId, false, "ORDER_CREATION_FAILED")
+            } catch (_: CancellationException) {
+                emitOrderUpdated(requestId, false, "SUPERSEDED_UPDATE_ORDER")
+            } catch (error: Exception) {
+                val mapped = nativeError(error)
+                reportLoadFailureIfNeeded(mapped.first, mapped.second)
+                emitOrderUpdated(requestId, false, mapped.first)
+            } finally {
+                orders.close(requestId)
+            }
+        }
+    }
+
+    private fun reportLoadFailureIfNeeded(code: String, message: String) {
+        if (didSendReady) return
+        emitFailed(code, message)
+    }
+
+    private fun emitUpdateFailed(error: PaymentError) {
+        val mapped = nativeError(error)
+        emitNativeEvent(
+            "onUpdateFailed",
+            Arguments.createMap().apply {
+                putString("code", mapped.first)
+                putString("message", mapped.second)
+            },
+        )
     }
 
     private fun emitOrderUpdated(requestId: String, success: Boolean, error: String?) {
@@ -254,6 +390,8 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
         isOrderConsumed: Boolean,
         isInteractionEnabled: Boolean,
     ) {
+        // The form is still showing its loader until ready.
+        if (!didSendReady) return
         emitNativeEvent(
             "onAvailability",
             Arguments.createMap().apply {
@@ -280,6 +418,7 @@ class PaymentElementView(private val reactContext: ThemedReactContext) : FrameLa
 }
 
 private fun nativeError(error: Throwable): Pair<String, String> = when (error) {
+    is PaymentError.PaymentInProgress -> "PAYMENT_IN_PROGRESS" to error.merchantMessage()
     is PaymentError -> error.code to error.merchantMessage()
     else -> "PRESENT_ERROR" to "Failed to present"
 }

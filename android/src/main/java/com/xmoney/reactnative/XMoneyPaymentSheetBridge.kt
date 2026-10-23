@@ -196,6 +196,18 @@ internal object XMoneyPaymentSheetBridge {
         promise.reject("APPLE_PAY", "Apple Pay is only available on iOS.")
     }
 
+    fun beginApplePayUpdateOrder(@Suppress("UNUSED_PARAMETER") requestId: String, promise: Promise) {
+        promise.reject("APPLE_PAY", "Apple Pay is only available on iOS.")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    fun resolveApplePayOrder(requestId: String, orderPayload: String, orderChecksum: String) {
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    fun rejectApplePayOrder(requestId: String) {
+    }
+
     fun updateGooglePayOrder(
         reactContext: ReactApplicationContext,
         intentMap: ReadableMap,
@@ -219,14 +231,88 @@ internal object XMoneyPaymentSheetBridge {
             }
             val intent = BridgeConfigParser.parseIntent(payload, checksum)
             holder.lastIntent = intent
-            activity.lifecycleScope.launch {
+            holder.updates.start(activity.lifecycleScope) { generation ->
                 try {
                     googlePay.updateOrder(intent)
+                    if (!holder.updates.isCurrent(generation)) {
+                        promise.reject(
+                            "SUPERSEDED_UPDATE_ORDER",
+                            "Superseded by a newer updateOrder call",
+                        )
+                        return@start
+                    }
                     promise.resolve(null)
                 } catch (error: Exception) {
                     rejectNative(promise, error)
                 }
             }
+        }
+    }
+
+    fun beginGooglePayUpdateOrder(
+        reactContext: ReactApplicationContext,
+        requestId: String,
+        promise: Promise,
+        holder: GooglePayHolder,
+    ) {
+        val activity = reactContext.currentActivity as? FragmentActivity
+        if (activity == null) {
+            promise.reject("NO_PRESENTER", "Unable to present from the current screen.")
+            return
+        }
+        UiThreadUtil.runOnUiThread {
+            if (holder.orders.isFinished(requestId)) {
+                promise.reject(
+                    "SUPERSEDED_UPDATE_ORDER",
+                    "Superseded by a newer updateOrder call",
+                )
+                return@runOnUiThread
+            }
+            val deferred = holder.orders.gate(requestId)
+            val googlePay = holder.googlePay
+            if (deferred == null || googlePay == null) {
+                holder.orders.close(requestId)
+                promise.reject("NOT_INITIALIZED", "Call init before present.")
+                return@runOnUiThread
+            }
+            holder.updates.start(activity.lifecycleScope) { generation ->
+                try {
+                    val bound = googlePay.updateOrder {
+                        deferred.await()
+                    }
+                    if (!holder.updates.isCurrent(generation)) {
+                        promise.reject(
+                            "SUPERSEDED_UPDATE_ORDER",
+                            "Superseded by a newer updateOrder call",
+                        )
+                        return@start
+                    }
+                    holder.lastIntent = bound
+                    promise.resolve(null)
+                } catch (error: Exception) {
+                    rejectNative(promise, error)
+                } finally {
+                    holder.orders.close(requestId)
+                }
+            }
+        }
+    }
+
+    fun resolveGooglePayOrder(
+        requestId: String,
+        orderPayload: String,
+        orderChecksum: String,
+        holder: GooglePayHolder,
+    ) {
+        val intent = BridgeConfigParser.parseIntent(orderPayload, orderChecksum)
+        UiThreadUtil.runOnUiThread {
+            holder.orders.settle(requestId, intent)
+        }
+    }
+
+    fun rejectGooglePayOrder(requestId: String, holder: GooglePayHolder) {
+        UiThreadUtil.runOnUiThread {
+            holder.orders.settleRejected(requestId)
         }
     }
 
@@ -241,11 +327,20 @@ internal object XMoneyPaymentSheetBridge {
                     "SUPERSEDED_UPDATE_ORDER",
                     "Superseded by a newer updateOrder call",
                 )
+            is OrderCreationRejected ->
+                promise.reject("ORDER_CREATION_FAILED", "Order creation failed")
+            is PaymentError.PaymentInProgress ->
+                promise.reject("PAYMENT_IN_PROGRESS", error.merchantMessage())
             is PaymentError -> promise.reject(error.code, error.merchantMessage())
             is IllegalStateException ->
                 promise.reject("GOOGLE_PAY", error.message ?: "Google Pay is not presented")
             else -> promise.reject("PRESENT_ERROR", "Failed to present")
         }
+    }
+
+    private fun googlePayErrorCode(error: PaymentError): String = when (error) {
+        is PaymentError.PaymentInProgress -> "PAYMENT_IN_PROGRESS"
+        else -> error.code
     }
 
     fun applePayState(): WritableMap = BridgeResults.walletStateMap(
@@ -317,6 +412,11 @@ internal object XMoneyPaymentSheetBridge {
                     putString("type", "onProcessing")
                     putBoolean("isProcessing", event.isProcessing)
                 }
+                is GooglePayEvent.UpdateFailed -> {
+                    putString("type", "onUpdateFailed")
+                    putString("code", googlePayErrorCode(event.error))
+                    putString("message", event.error.merchantMessage())
+                }
             }
         }
         emitEvent(reactContext, body)
@@ -365,6 +465,8 @@ internal class GooglePayHolder {
     var lastIntent: PaymentIntent? = null
     var isAvailable: Boolean = false
     var isReady: Boolean = false
+    val orders = PendingOrders()
+    val updates = OrderUpdateLaunch()
 }
 
 internal object BridgeResults {

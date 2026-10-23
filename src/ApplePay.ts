@@ -9,6 +9,10 @@ import {
   sanitizePaymentError,
   XMoneyPaymentError,
 } from './errors';
+import {
+  createImperativeOrderUpdater,
+  type OrderUpdater,
+} from './components/orderUpdater';
 import { getModule, nextRequestId, subscribeNativeEvents } from './nativeModule';
 import { parsePaymentResult } from './parseResult';
 import { PresentSession } from './presentSession';
@@ -17,10 +21,28 @@ import type {
   PaymentConfig,
   PaymentIntent,
   PaymentResult,
+  UpdateOrderContext,
   WalletState,
 } from './types';
 
 const session = new PresentSession();
+let orders: OrderUpdater | null = null;
+
+function orderUpdater(): OrderUpdater {
+  if (!orders) {
+    orders = createImperativeOrderUpdater({
+      updateIntent: (intent) => getModule().updateApplePayOrder(intent),
+      begin: (requestId) => getModule().beginApplePayUpdateOrder(requestId),
+      resolve: (orderPayload, orderChecksum, requestId) => {
+        getModule().resolveApplePayOrder(requestId, orderPayload, orderChecksum);
+      },
+      reject: (requestId) => {
+        getModule().rejectApplePayOrder(requestId);
+      },
+    });
+  }
+  return orders;
+}
 
 function unsupported(): PaymentResult {
   return {
@@ -38,7 +60,9 @@ function unsupported(): PaymentResult {
  * `{ status: 'canceled' }`. Call `dismiss()` then `present()` to replace.
  * Pre-auth PassKit dismiss resolves `{ status: 'canceled' }` and does not consume.
  *
- * `updateOrder` may run before `present` (native stores the next payable intent).
+ * `updateOrder(intent)` may run before `present` (native stores the next payable
+ * intent). `updateOrder(createOrder)` locks Pay when the native call runs.
+ * The callback receives `{ isCurrent, signal }`.
  *
  * `getState()` reads PassKit `canMakePayments()` for both `isAvailable` and
  * `isReady` (no intent). That is not a site-vs-device split.
@@ -66,7 +90,11 @@ export const ApplePay = {
     const requestId = nextRequestId('xmoney-ap');
     const subscription = subscribeNativeEvents(
       requestId,
-      session.track(generation, onEvent)
+      session.track(generation, (event) => {
+        if (event.type !== 'updateFailed') {
+          onEvent?.(event);
+        }
+      })
     );
     try {
       const raw = await getModule().presentApplePay({ ...intent, requestId });
@@ -80,10 +108,11 @@ export const ApplePay = {
   },
 
   /**
-   * Bind the next payable intent. May be called before `present`.
-   * Pay stays locked until this returns.
+   * `updateOrder(intent)` binds a signed intent. Pay stays enabled until the
+   * bind starts. `updateOrder(createOrder)` locks Pay when native receives the
+   * call and returns the bound intent. May be called before `present`.
    */
-  async updateOrder(intent: PaymentIntent): Promise<void> {
+  updateOrder: (async (intentOrCreate) => {
     getModule();
     if (Platform.OS !== 'ios') {
       throw new XMoneyPaymentError(
@@ -91,7 +120,12 @@ export const ApplePay = {
         'Apple Pay is only available on iOS.'
       );
     }
-    await getModule().updateApplePayOrder(intent);
+    return orderUpdater().updateOrder(intentOrCreate);
+  }) as {
+    (intent: PaymentIntent): Promise<void>;
+    (
+      createOrder: (ctx: UpdateOrderContext) => Promise<PaymentIntent>
+    ): Promise<PaymentIntent>;
   },
 
   dismiss(): void {
@@ -110,4 +144,6 @@ export const ApplePay = {
 /** Clears in-flight present state. Used by unit tests. */
 export function resetApplePayState(): void {
   session.reset();
+  orders?.detach();
+  orders = null;
 }

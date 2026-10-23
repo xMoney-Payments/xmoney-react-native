@@ -1,4 +1,6 @@
-import type { PaymentSheetEvent } from './types';
+import type { PaymentSheetEvent, UpdateFailedEvent } from './types';
+
+export type PresentEvent = PaymentSheetEvent | UpdateFailedEvent;
 
 /** Tracks one process-wide present so a second call can replace an idle sheet. */
 export class PresentSession {
@@ -25,8 +27,8 @@ export class PresentSession {
 
   track(
     generation: number,
-    onEvent?: (event: PaymentSheetEvent) => void
-  ): (event: PaymentSheetEvent) => void {
+    onEvent?: (event: PresentEvent) => void
+  ): (event: PresentEvent) => void {
     return (event) => {
       if (generation === this.generation && event.type === 'processing') {
         this.isProcessing = event.isProcessing;
