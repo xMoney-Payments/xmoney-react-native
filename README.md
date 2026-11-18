@@ -19,7 +19,7 @@ Legacy-architecture support applies to React Native 0.76–0.81 and will be remo
 
 ## Installation
 
-Latest release: **`1.1.0`**
+Latest release: **`1.1.1`**
 
 ```bash
 npm install @xmoney/react-native

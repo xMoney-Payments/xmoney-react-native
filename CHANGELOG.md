@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-18
+
+Pins native SDKs to CocoaPods `XMoneyPaymentSheet` **1.1.1** and Maven `com.xmoney:*` **1.1.0**.
+
+### Fixed
+
+- iOS codegen no longer skips the package when it is installed from npm. `exports` now includes `./package.json`, so `XMoneyPaymentSheetSpec` is generated and `XMoneyPaymentSheet.mm` compiles.
+- Metro resolves the package to the TypeScript sources through a `react-native` export condition, so `@react-native/babel-plugin-codegen` reads the typed specs instead of failing with "Could not find component config for native component".
+- iOS apps with their own asset catalog no longer fail with "Multiple commands produce Assets.car". `XMoneyPaymentSheet` 1.1.1 ships its assets in resource bundles.
+- iOS release builds no longer crash with `SIGABRT` in the Swift concurrency runtime while the payment sheet loads.
+- iOS: the Mastercard logo in the "Use other card" row keeps its own height, the payment form no longer logs Auto Layout conflicts on first layout, and the Roobert fonts no longer log "GSFont: file already registered".
+
 ## [1.1.0] - 2026-10-16
 
 Pins native SDKs to CocoaPods `XMoneyPaymentSheet` **1.1.0** and Maven `com.xmoney:*` **1.1.0**.
